@@ -104,15 +104,48 @@ def _run_migrations():
         except Exception as e:
             db.session.rollback()
             print(f"[migration] user_branches: {e}")
-
-    # 3. Drop payment_requests to recreate with new schema (no data in new deploys)
-    if 'payment_request_items' not in tables and 'payment_requests' in tables:
+    elif 'user_branches' in tables and 'users' in tables:
+        # Table exists but may be empty — re-run the data migration safely
         try:
-            db.session.execute(text("DROP TABLE payment_requests CASCADE"))
+            db.session.execute(text("""
+                INSERT INTO user_branches (user_id, branch_id)
+                SELECT u.id, u.branch_id FROM users u
+                WHERE u.branch_id IS NOT NULL AND u.role = 'accountant'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_branches ub
+                      WHERE ub.user_id = u.id AND ub.branch_id = u.branch_id
+                  )
+            """))
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            print(f"[migration] drop payment_requests: {e}")
+            print(f"[migration] user_branches backfill: {e}")
+
+    # 3. If payment_requests still has the old single-item columns, rebuild both tables.
+    #    The old schema had description/category_id/quantity/rate as NOT NULL columns.
+    #    New schema moves those fields to payment_request_items.
+    if 'payment_requests' in tables:
+        pr_cols = {c['name'] for c in insp.get_columns('payment_requests')}
+        if 'description' in pr_cols or 'category_id' in pr_cols:
+            try:
+                db.session.execute(text("DROP TABLE IF EXISTS payment_request_items"))
+                db.session.execute(text("DROP TABLE payment_requests CASCADE"))
+                db.session.commit()
+                print("[migration] rebuilt payment_requests to multi-item schema")
+            except Exception as e:
+                db.session.rollback()
+                # SQLite fallback: drop columns individually
+                try:
+                    for col in ['description', 'category_id', 'quantity', 'rate']:
+                        if col in pr_cols:
+                            db.session.execute(text(
+                                f"ALTER TABLE payment_requests DROP COLUMN {col}"
+                            ))
+                    db.session.commit()
+                    print(f"[migration] dropped old columns (SQLite fallback): {e}")
+                except Exception as e2:
+                    db.session.rollback()
+                    print(f"[migration] payment_requests schema update failed: {e2}")
 
 
 def _seed_defaults():
