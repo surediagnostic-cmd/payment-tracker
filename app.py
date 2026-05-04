@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_mail import Mail
@@ -51,6 +51,13 @@ def create_app():
     app.register_blueprint(reports_bp)
     app.register_blueprint(admin_bp)
 
+    @app.route("/")
+    def root():
+        from flask_login import current_user
+        if current_user.is_authenticated:
+            return redirect(url_for("requests.dashboard"))
+        return redirect(url_for("auth.login"))
+
     @app.route("/health")
     def health():
         return "ok", 200
@@ -60,12 +67,19 @@ def create_app():
         import traceback
         tb = traceback.format_exc()
         print(f"[500 ERROR]\n{tb}", flush=True)
-        db.session.rollback()
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         try:
             from flask import render_template as rt
             return rt("500.html", error=str(error), traceback=tb), 500
         except Exception:
-            return f"<pre style='padding:20px;'>500 Internal Server Error\n\n{tb}</pre>", 500
+            return (
+                f"<pre style='padding:20px;background:#0b1e3d;color:#ff9d45;"
+                f"font-family:monospace;font-size:13px;min-height:100vh;margin:0;'>"
+                f"500 Internal Server Error\n\n{tb}</pre>"
+            ), 500
 
     with app.app_context():
         # Step 1 — migrations (schema changes to existing tables)

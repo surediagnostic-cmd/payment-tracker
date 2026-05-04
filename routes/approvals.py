@@ -94,9 +94,13 @@ def review(req_id):
             return redirect(url_for("requests.dashboard"))
 
         except Exception as e:
-            db.session.rollback()
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             current_app.logger.error(f"Approval error for req {req_id}: {e}", exc_info=True)
-            flash(f"An error occurred while processing the request: {str(e)}", "error")
+            print(f"[approval error] req {req_id}: {e}", flush=True)
+            flash(f"An error occurred: {str(e)}", "error")
             return redirect(url_for("approvals.review", req_id=req_id))
 
     return render_template("review_request.html", pr=pr)

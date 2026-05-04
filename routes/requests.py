@@ -320,7 +320,11 @@ def new_request():
             flash(f"Payment request {ref} submitted successfully.", "success")
             return redirect(url_for("requests.dashboard"))
         except Exception as e:
-            db.session.rollback()
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            print(f"[submit error]: {e}", flush=True)
             flash(f"Error submitting request: {str(e)}", "error")
 
     return render_template("new_request.html", categories=categories, user_branches=user_branch_list)
