@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}All Payments{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+  <div>
+    <div class="section-title">All Payments</div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;">{{ requests | length }} record(s) found</div>
+  </div>
+  <a href="{{ url_for('reports.export') }}{% if filters.branch_id %}?branch_id={{ filters.branch_id }}{% endif %}{% if filters.month %}&month={{ filters.month }}{% endif %}"
+     class="btn-primary" style="font-size:13px;">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Export Excel
+  </a>
+</div>
+
+<!-- Filters -->
+<div class="card" style="padding:18px; margin-bottom:20px;">
+  <form method="GET" action="{{ url_for('requests.list_requests') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+    <div>
+      <label class="label">Month</label>
+      <input type="month" name="month" class="inp" style="width:160px;" value="{{ filters.month or '' }}"/>
+    </div>
+    {% if current_user.is_mds %}
+    <div>
+      <label class="label">Branch</label>
+      <select name="branch_id" class="inp" style="width:150px;">
+        <option value="">All branches</option>
+        {% for b in branches %}
+        <option value="{{ b.id }}" {% if filters.branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div>
+      <label class="label">Status</label>
+      <select name="status" class="inp" style="width:130px;">
+        <option value="">All</option>
+        <option value="pending"  {% if filters.status == 'pending'  %}selected{% endif %}>Pending</option>
+        <option value="approved" {% if filters.status == 'approved' %}selected{% endif %}>Approved</option>
+        <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>Rejected</option>
+      </select>
+    </div>
+    <div>
+      <label class="label">Category</label>
+      <select name="category_id" class="inp" style="width:180px;">
+        <option value="">All categories</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if filters.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn-primary" style="padding:10px 20px;">Filter</button>
+    <a href="{{ url_for('requests.list_requests') }}" class="btn-outline" style="padding:10px 16px;">Clear</a>
+  </form>
+</div>
+
+<!-- Table -->
+<div class="card" style="overflow:hidden;">
+  {% if requests %}
+  <table>
+    <thead><tr>
+      <th>Reference</th>
+      <th>Date</th>
+      {% if current_user.is_mds %}<th>Branch</th>{% endif %}
+      <th>Category</th>
+      <th>Description</th>
+      <th>Requested (₦)</th>
+      <th>Approved (₦)</th>
+      <th>Status</th>
+      <th>Upload</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      {% for pr in requests %}
+      <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'">
+        <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
+        <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b %Y") }}</td>
+        {% if current_user.is_mds %}<td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>{% endif %}
+        <td style="color:var(--muted); font-size:12px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.category.name }}</td>
+        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.description }}</td>
+        <td>{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
+        <td style="color:var(--green); font-weight:700;">
+          {% if pr.approved_amount %}{{ "{:,.2f}".format(pr.approved_amount | float) }}{% else %}—{% endif %}
+        </td>
+        <td><span class="badge badge-{{ pr.status_color }}">{{ pr.status | title }}</span></td>
+        <td>
+          {% if pr.upload_status == 'uploaded' %}
+            <span class="badge badge-green" style="font-size:10px;">Uploaded</span>
+          {% elif pr.status == 'approved' %}
+            <form method="POST" action="{{ url_for('requests.mark_uploaded', req_id=pr.id) }}" onclick="event.stopPropagation()">
+              <button type="submit" class="btn-outline" style="padding:4px 10px; font-size:11px;">Mark Uploaded</button>
+            </form>
+          {% else %}
+            <span style="color:var(--dim); font-size:11px;">—</span>
+          {% endif %}
+        </td>
+        <td onclick="event.stopPropagation()">
+          {% if current_user.is_mds and pr.status == 'pending' %}
+          <a href="{{ url_for('approvals.review', req_id=pr.id) }}" class="btn-primary" style="padding:5px 12px; font-size:11px;">Review</a>
+          {% else %}
+          <a href="{{ url_for('requests.view_request', req_id=pr.id) }}" style="color:var(--orange); font-size:12px; text-decoration:none; font-weight:600;">View</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:48px; text-align:center; color:var(--muted); font-size:14px;">No payment requests match your filters.</div>
+  {% endif %}
+</div>
+{% endblock %}

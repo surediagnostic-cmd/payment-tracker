@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Review {{ pr.reference }}{% endblock %}
+
+{% block content %}
+<div style="max-width:700px;">
+  <div style="margin-bottom:24px;">
+    <a href="{{ url_for('requests.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none; font-weight:500;">← Back to Dashboard</a>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:8px; flex-wrap:wrap;">
+      <div class="section-title">Review Request</div>
+      <span style="font-family:monospace; font-size:13px; color:var(--orange2); background:var(--orange-d); padding:4px 12px; border-radius:6px; border:1px solid rgba(245,130,31,.3);">{{ pr.reference }}</span>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="card" style="padding:24px; margin-bottom:20px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:20px;">
+      <div><div class="label">Branch</div><div style="color:var(--orange2); font-weight:700;">{{ pr.branch.name }}</div></div>
+      <div><div class="label">Date</div><div>{{ pr.date.strftime("%d %B %Y") }}</div></div>
+      <div><div class="label">Submitted by</div><div>{{ pr.submitter.name }}</div></div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <div class="label">Category</div>
+      <div><span class="badge badge-blue">{{ pr.category.name }}</span></div>
+    </div>
+    <div style="margin-bottom:20px;">
+      <div class="label">Description</div>
+      <div style="color:var(--white); font-size:16px; font-weight:600;">{{ pr.description }}</div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px;">
+      <div class="card2" style="padding:14px; text-align:center;">
+        <div class="label">Qty</div>
+        <div style="font-size:22px; font-weight:800; color:var(--white);">{{ pr.quantity }}</div>
+      </div>
+      <div class="card2" style="padding:14px; text-align:center;">
+        <div class="label">Unit Rate</div>
+        <div style="font-size:18px; font-weight:700; color:var(--white);">₦{{ "{:,.2f}".format(pr.rate | float) }}</div>
+      </div>
+      <div class="card2" style="padding:14px; text-align:center; border-color:rgba(245,130,31,.3); background:var(--orange-d);">
+        <div class="label" style="color:var(--orange);">Requested</div>
+        <div style="font-size:20px; font-weight:800; color:var(--orange2);">₦{{ "{:,.2f}".format(pr.requested_amount | float) }}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:16px;">
+      <div class="label">Beneficiary</div>
+      <div style="display:flex; gap:24px; margin-top:8px; flex-wrap:wrap;">
+        <div><span style="color:var(--muted); font-size:12px;">Name: </span><span style="color:var(--white); font-weight:600;">{{ pr.beneficiary_name }}</span></div>
+        <div><span style="color:var(--muted); font-size:12px;">Account: </span><span style="font-family:monospace; color:var(--orange2); font-size:15px;">{{ pr.beneficiary_account }}</span></div>
+        <div><span style="color:var(--muted); font-size:12px;">Bank: </span><span>{{ pr.beneficiary_bank }}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Decision form -->
+  <form method="POST" action="{{ url_for('approvals.review', req_id=pr.id) }}">
+    <div class="card" style="padding:24px; border-color:rgba(245,130,31,.2);">
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px;">Your Decision</div>
+
+      <div style="margin-bottom:18px;">
+        <label class="label">Approved Amount (₦) <span style="color:var(--muted); text-transform:none; letter-spacing:0; font-weight:400;">— edit if different from requested</span></label>
+        <input type="text" name="approved_amount" class="inp"
+               value="{{ "{:.2f}".format(pr.requested_amount | float) }}"
+               style="font-size:20px; font-weight:800; color:var(--orange2);" required/>
+      </div>
+
+      <div style="margin-bottom:24px;">
+        <label class="label">Comment <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional — shown to accountant)</span></label>
+        <textarea name="mds_comment" class="inp" rows="3" placeholder="e.g. Approved. Please verify receipt before upload."></textarea>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <button type="submit" name="action" value="approve" class="btn-primary" style="padding:12px 28px; font-size:15px;">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          Approve Payment
+        </button>
+        <button type="submit" name="action" value="reject" class="btn-danger" style="padding:12px 24px; font-size:14px;"
+                onclick="return confirm('Reject this request? The accountant will be notified.')">
+          ✕ Reject
+        </button>
+        <a href="{{ url_for('requests.dashboard') }}" class="btn-outline">Cancel</a>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}

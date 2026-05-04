@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Admin Settings{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:28px;">
+  <div class="section-title">Admin Settings</div>
+  <div style="font-size:13px; color:var(--muted); margin-top:4px;">Manage branches, expense categories, and user accounts.</div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+
+  <!-- Branches -->
+  <div class="card" style="padding:24px;">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:6px;">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+      Branches
+    </div>
+    <form method="POST" action="{{ url_for('admin.add_branch') }}" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" name="name" class="inp" placeholder="Branch name" required style="flex:1; min-width:90px;"/>
+      <input type="text" name="source_account" class="inp" placeholder="Source account" style="flex:1; min-width:90px;"/>
+      <button type="submit" class="btn-primary" style="padding:10px 14px; white-space:nowrap;">+ Add</button>
+    </form>
+    <div style="display:flex; flex-direction:column; gap:8px; max-height:300px; overflow-y:auto;">
+      {% for b in branches %}
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:var(--bg2); border:1px solid var(--border); border-radius:8px;">
+        <div>
+          <div style="font-size:13px; font-weight:600; color:{% if b.is_active %}var(--white){% else %}var(--dim){% endif %};">{{ b.name }}</div>
+          {% if b.source_account %}<div style="font-size:11px; color:var(--muted); margin-top:2px;">{{ b.source_account }}</div>{% endif %}
+        </div>
+        <form method="POST" action="{{ url_for('admin.toggle_branch', branch_id=b.id) }}">
+          <button type="submit" class="btn-outline" style="padding:4px 10px; font-size:11px; {% if b.is_active %}{% else %}border-color:var(--orange); color:var(--orange);{% endif %}">
+            {% if b.is_active %}Deactivate{% else %}Activate{% endif %}
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Categories -->
+  <div class="card" style="padding:24px;">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:6px;">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      Expense Categories
+    </div>
+    <form method="POST" action="{{ url_for('admin.add_category') }}" style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text" name="name" class="inp" placeholder="Category name" required style="flex:1;"/>
+      <button type="submit" class="btn-primary" style="padding:10px 14px; white-space:nowrap;">+ Add</button>
+    </form>
+    <div style="display:flex; flex-direction:column; gap:8px; max-height:300px; overflow-y:auto;">
+      {% for c in categories %}
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:9px 12px; background:var(--bg2); border:1px solid var(--border); border-radius:8px;">
+        <span style="font-size:13px; color:{% if c.is_active %}var(--white){% else %}var(--dim){% endif %};">{{ c.name }}</span>
+        <form method="POST" action="{{ url_for('admin.toggle_category', cat_id=c.id) }}">
+          <button type="submit" class="btn-outline" style="padding:4px 10px; font-size:11px; {% if not c.is_active %}border-color:var(--orange); color:var(--orange);{% endif %}">
+            {% if c.is_active %}Deactivate{% else %}Activate{% endif %}
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Users -->
+<div class="card" style="padding:24px;">
+  <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px; display:flex; align-items:center; gap:6px;">
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+    User Accounts
+  </div>
+
+  <form method="POST" action="{{ url_for('admin.add_user') }}"
+        style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr 1fr auto; gap:10px; margin-bottom:24px; align-items:flex-end;">
+    <div>
+      <label class="label">Full Name</label>
+      <input type="text" name="name" class="inp" placeholder="Amaka Obi" required/>
+    </div>
+    <div>
+      <label class="label">Email</label>
+      <input type="email" name="email" class="inp" placeholder="user@surediagnostics.com" required/>
+    </div>
+    <div>
+      <label class="label">Role</label>
+      <select name="role" class="inp" id="roleSelect" onchange="toggleBranch(this.value)">
+        <option value="accountant">Accountant</option>
+        <option value="mds">MDS</option>
+      </select>
+    </div>
+    <div id="branchField">
+      <label class="label">Branch</label>
+      <select name="branch_id" class="inp">
+        <option value="">— Select —</option>
+        {% for b in branches if b.is_active %}
+        <option value="{{ b.id }}">{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">Password</label>
+      <input type="text" name="password" class="inp" placeholder="Temp password" required minlength="6"/>
+    </div>
+    <div>
+      <button type="submit" class="btn-primary" style="padding:11px 16px; white-space:nowrap;">+ Add User</button>
+    </div>
+  </form>
+
+  <div style="overflow:hidden; border-radius:10px; border:1px solid var(--border);">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td style="font-weight:600; color:var(--white);">{{ u.name }}</td>
+          <td style="color:var(--muted); font-size:12px;">{{ u.email }}</td>
+          <td><span class="badge {% if u.is_mds %}badge-orange{% else %}badge-blue{% endif %}">{{ u.role | upper }}</span></td>
+          <td style="color:var(--muted); font-size:12px;">{{ u.branch.name if u.branch else "—" }}</td>
+          <td>
+            {% if u.is_active %}<span class="badge badge-green" style="font-size:10px;">Active</span>
+            {% else %}<span class="badge badge-gray" style="font-size:10px;">Inactive</span>{% endif %}
+          </td>
+          <td>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <form method="POST" action="{{ url_for('admin.toggle_user', user_id=u.id) }}">
+                <button type="submit" class="btn-outline" style="padding:4px 10px; font-size:11px;">
+                  {% if u.is_active %}Deactivate{% else %}Activate{% endif %}
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('admin.reset_password', user_id=u.id) }}"
+                    style="display:inline-flex; gap:6px;" onsubmit="return confirm('Reset password for {{ u.name }}?')">
+                <input type="text" name="new_password" placeholder="New password" class="inp"
+                       style="width:120px; padding:5px 10px; font-size:12px;" minlength="6" required/>
+                <button type="submit" class="btn-outline" style="padding:4px 10px; font-size:11px; white-space:nowrap;">Reset PW</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function toggleBranch(role) {
+  document.getElementById('branchField').style.display = role === 'mds' ? 'none' : '';
+}
+</script>
+{% endblock %}
