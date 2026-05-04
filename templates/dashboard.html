@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}
-  {% if current_user.is_mds %}Payment Dashboard{% else %}My Payments — {{ current_user.branches[0].name if current_user.branches else "" }}{% endif %}
+  {% if current_user.is_mds %}Payment Dashboard{% else %}My Payments{% endif %}
 {% endblock %}
 
 {% block content %}
