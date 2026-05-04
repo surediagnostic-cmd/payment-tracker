@@ -57,12 +57,62 @@ def create_app():
 
     with app.app_context():
         try:
+            _run_migrations()
             db.create_all()
             _seed_defaults()
         except Exception as e:
             print(f"[startup] DB init warning: {e}", flush=True)
 
     return app
+
+
+def _run_migrations():
+    """Apply incremental schema changes to existing deployments."""
+    from sqlalchemy import text, inspect
+    insp = inspect(db.engine)
+    tables = set(insp.get_table_names())
+
+    # 1. Add cost_type to categories
+    if 'categories' in tables:
+        cols = {c['name'] for c in insp.get_columns('categories')}
+        if 'cost_type' not in cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE categories ADD COLUMN cost_type VARCHAR(20) NOT NULL DEFAULT 'overhead'"
+                ))
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] cost_type: {e}")
+
+    # 2. Create user_branches and migrate existing branch_id data
+    if 'user_branches' not in tables and 'users' in tables and 'branches' in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE user_branches (
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                    PRIMARY KEY (user_id, branch_id)
+                )
+            """))
+            db.session.execute(text("""
+                INSERT INTO user_branches (user_id, branch_id)
+                SELECT id, branch_id FROM users
+                WHERE branch_id IS NOT NULL AND role = 'accountant'
+            """))
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] user_branches: {e}")
+
+    # 3. Drop payment_requests to recreate with new schema (no data in new deploys)
+    if 'payment_request_items' not in tables and 'payment_requests' in tables:
+        try:
+            db.session.execute(text("DROP TABLE payment_requests CASCADE"))
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] drop payment_requests: {e}")
 
 
 def _seed_defaults():

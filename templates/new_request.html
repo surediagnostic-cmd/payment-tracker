@@ -2,61 +2,90 @@
 {% block title %}New Payment Request{% endblock %}
 
 {% block content %}
-<div style="max-width:720px;">
+<div style="max-width:860px;">
   <div style="margin-bottom:28px;">
     <a href="{{ url_for('requests.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none; font-weight:500;">← Back to Dashboard</a>
     <div class="section-title" style="margin-top:8px;">New Payment Request</div>
-    <div style="font-size:13px; color:var(--muted); margin-top:4px;">
-      {{ current_user.branch.name if current_user.branch else "" }} · {{ current_user.name }}
-    </div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;">{{ current_user.name }}</div>
   </div>
 
-  <form method="POST" action="{{ url_for('requests.new_request') }}">
+  <form method="POST" action="{{ url_for('requests.new_request') }}" id="prForm">
+
+    <!-- Payment header -->
     <div class="card" style="padding:28px; margin-bottom:20px;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px; display:flex; align-items:center; gap:6px;">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        Payment Details
-      </div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px;">Payment Details</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
         <div>
           <label class="label">Payment Date *</label>
-          <input type="date" name="date" class="inp" required/>
+          <input type="date" name="date" class="inp" required id="dateField"/>
         </div>
         <div>
-          <label class="label">Expense Category *</label>
-          <select name="category_id" class="inp" required>
-            <option value="">— Select category —</option>
-            {% for cat in categories %}
-            <option value="{{ cat.id }}">{{ cat.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-      <div style="margin-top:18px;">
-        <label class="label">Description / Item *</label>
-        <input type="text" name="description" class="inp" placeholder="e.g. Lab reagents — March 2026 batch" required maxlength="255"/>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; margin-top:18px;">
-        <div>
-          <label class="label">Quantity *</label>
-          <input type="number" name="quantity" id="qty" class="inp" placeholder="1" min="1" required value="1" oninput="calcTotal()"/>
-        </div>
-        <div>
-          <label class="label">Unit Rate (₦) *</label>
-          <input type="text" name="rate" id="rate" class="inp" placeholder="0.00" required oninput="calcTotal()"/>
-        </div>
-        <div>
-          <label class="label">Total Amount (₦)</label>
-          <div class="inp" id="total_display" style="background:var(--card2); color:var(--orange2); font-weight:800; font-size:16px; cursor:default;">0.00</div>
+          <label class="label">Branch *</label>
+          {% if user_branches | length == 1 %}
+            <div class="inp" style="background:var(--card2); color:var(--white); cursor:default;">{{ user_branches[0].name }}</div>
+            <input type="hidden" name="branch_id" value="{{ user_branches[0].id }}"/>
+          {% else %}
+            <select name="branch_id" class="inp" required>
+              <option value="">— Select branch —</option>
+              {% for b in user_branches %}
+              <option value="{{ b.id }}">{{ b.name }}</option>
+              {% endfor %}
+            </select>
+          {% endif %}
         </div>
       </div>
     </div>
 
+    <!-- Line items -->
     <div class="card" style="padding:28px; margin-bottom:20px;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px; display:flex; align-items:center; gap:6px;">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-        Beneficiary Details
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center;">
+        <span>Line Items</span>
+        <button type="button" onclick="addRow()" class="btn-outline" style="padding:5px 14px; font-size:12px;">+ Add Item</button>
       </div>
+
+      <div id="itemsContainer">
+        <!-- Row template filled by JS; one default row rendered here -->
+        <div class="item-row" style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:14px;">
+          <div>
+            <label class="label" style="margin-bottom:4px;">Description *</label>
+            <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:4px;">Category *</label>
+            <select name="category_ids[]" class="inp" required>
+              <option value="">— Select —</option>
+              {% for cat in categories %}
+              <option value="{{ cat.id }}">{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:4px;">Qty *</label>
+            <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:4px;">Rate (₦) *</label>
+            <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:4px;">Amount (₦)</label>
+            <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
+          </div>
+          <div style="padding-bottom:2px;">
+            <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px; display:none;">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:8px; display:flex; justify-content:flex-end; align-items:center; gap:16px;">
+        <span style="font-size:13px; color:var(--muted); font-weight:600;">TOTAL REQUESTED</span>
+        <span id="grandTotal" style="font-size:22px; font-weight:800; color:var(--orange2);">₦0.00</span>
+      </div>
+    </div>
+
+    <!-- Beneficiary -->
+    <div class="card" style="padding:28px; margin-bottom:20px;">
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px;">Beneficiary Details</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
         <div>
           <label class="label">Beneficiary Name *</label>
@@ -76,7 +105,7 @@
           </select>
         </div>
         <div>
-          <label class="label">Bank Code <span style="color:var(--dim); text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <label class="label">Bank Code <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional)</span></label>
           <input type="text" name="bank_code" class="inp" placeholder="e.g. 058" maxlength="10"/>
         </div>
       </div>
@@ -93,12 +122,68 @@
 </div>
 
 <script>
-function calcTotal() {
-  const qty = parseFloat(document.getElementById('qty').value) || 0;
-  const rate = parseFloat(document.getElementById('rate').value.replace(/,/g,'')) || 0;
-  document.getElementById('total_display').textContent =
-    (qty * rate).toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}">{{ cat.name }}</option>{% endfor %}`;
+
+document.getElementById('dateField').value = new Date().toISOString().split('T')[0];
+
+function rowHtml() {
+  return `<div class="item-row" style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:14px;">
+    <div>
+      <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+    </div>
+    <div>
+      <select name="category_ids[]" class="inp" required>
+        <option value="">— Select —</option>
+        ${categoryOptions}
+      </select>
+    </div>
+    <div>
+      <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
+    </div>
+    <div>
+      <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
+    </div>
+    <div>
+      <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
+    </div>
+    <div style="padding-bottom:2px;">
+      <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px;">✕</button>
+    </div>
+  </div>`;
 }
-document.querySelector('input[name="date"]').value = new Date().toISOString().split('T')[0];
+
+function addRow() {
+  const container = document.getElementById('itemsContainer');
+  container.insertAdjacentHTML('beforeend', rowHtml());
+  updateRemoveButtons();
+}
+
+function removeRow(btn) {
+  btn.closest('.item-row').remove();
+  calcGrandTotal();
+  updateRemoveButtons();
+}
+
+function updateRemoveButtons() {
+  const rows = document.querySelectorAll('.item-row');
+  rows.forEach((row, i) => {
+    const btn = row.querySelector('button');
+    if (btn) btn.style.display = rows.length > 1 ? '' : 'none';
+  });
+}
+
+function calcGrandTotal() {
+  let grand = 0;
+  document.querySelectorAll('.item-row').forEach(row => {
+    const qty  = parseFloat(row.querySelector('.qty-input').value) || 0;
+    const rate = parseFloat(row.querySelector('.rate-input').value.replace(/,/g,'')) || 0;
+    const amt  = qty * rate;
+    grand += amt;
+    row.querySelector('.row-total').textContent = amt.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+  });
+  document.getElementById('grandTotal').textContent = '₦' + grand.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+updateRemoveButtons();
 </script>
 {% endblock %}

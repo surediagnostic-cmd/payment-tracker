@@ -34,6 +34,11 @@ def review(req_id):
             flash("Invalid action.", "error")
             return redirect(url_for("approvals.review", req_id=req_id))
 
+        item_lines = "\n".join(
+            f"  • {it.description} ({it.category.name}) — ₦{it.amount:,.2f}"
+            for it in pr.items
+        )
+
         if action == "approve":
             approved_str = request.form.get("approved_amount", "").replace(",", "")
             try:
@@ -47,10 +52,11 @@ def review(req_id):
             body = (
                 f"Your payment request has been approved.\n\n"
                 f"Reference: {pr.reference}\n"
-                f"Description: {pr.description}\n"
+                f"Branch: {pr.branch.name}\n"
                 f"Requested: ₦{pr.requested_amount:,.2f}\n"
                 f"Approved Amount: ₦{pr.approved_amount:,.2f}\n"
                 f"MDS Comment: {comment or 'N/A'}\n\n"
+                f"Items:\n{item_lines}\n\n"
                 f"You can now proceed with the bank upload."
             )
         else:
@@ -59,9 +65,10 @@ def review(req_id):
             body = (
                 f"Your payment request has been rejected.\n\n"
                 f"Reference: {pr.reference}\n"
-                f"Description: {pr.description}\n"
+                f"Branch: {pr.branch.name}\n"
                 f"Requested Amount: ₦{pr.requested_amount:,.2f}\n"
                 f"Reason: {comment or 'No reason provided'}\n\n"
+                f"Items:\n{item_lines}\n\n"
                 f"Please contact MDS for clarification."
             )
 
@@ -69,7 +76,6 @@ def review(req_id):
         pr.reviewed_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        # Notify submitter
         submitter = User.query.get(pr.submitted_by)
         if submitter and submitter.email:
             send_email(to=submitter.email, subject=subject, body=body)

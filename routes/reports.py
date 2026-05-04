@@ -6,7 +6,7 @@ from io import BytesIO
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from app import db
-from models import PaymentRequest, Branch
+from models import PaymentRequest, PaymentRequestItem, Branch
 
 reports_bp = Blueprint("reports", __name__)
 
@@ -14,7 +14,6 @@ reports_bp = Blueprint("reports", __name__)
 @reports_bp.route("/reports")
 @login_required
 def reports():
-    # Reports are now embedded in the dashboard — redirect there
     return redirect(url_for("requests.dashboard", **request.args))
 
 
@@ -42,7 +41,7 @@ def export():
         except (ValueError, IndexError):
             pass
     if not current_user.is_mds:
-        q = q.filter_by(branch_id=current_user.branch_id)
+        q = q.filter_by(submitted_by=current_user.id)
 
     records = q.order_by(PaymentRequest.date.asc()).all()
 
@@ -50,19 +49,19 @@ def export():
     ws = wb.active
     ws.title = "Approved Payments"
 
-    orange_fill  = PatternFill("solid", fgColor="F5821F")
-    navy_fill    = PatternFill("solid", fgColor="0B1E3D")
-    header_font  = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
-    body_font    = Font(name="Calibri", size=10)
-    thin = Side(style="thin", color="1E3F7A")
+    orange_fill = PatternFill("solid", fgColor="F5821F")
+    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    body_font   = Font(name="Calibri", size=10)
+    thin   = Side(style="thin", color="1E3F7A")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center")
 
     headers = [
-        "Reference","Date","Branch","Category","Description",
-        "Qty","Rate (₦)","Requested (₦)","Approved (₦)",
-        "Beneficiary Name","Account Number","Bank","Bank Code",
-        "MDS Comment","Upload Status",
+        "Reference", "Date", "Branch",
+        "Category", "Cost Type", "Description", "Qty", "Rate (₦)", "Amount (₦)",
+        "Total Requested (₦)", "Total Approved (₦)",
+        "Beneficiary Name", "Account Number", "Bank", "Bank Code",
+        "MDS Comment", "Upload Status",
     ]
     ws.append(["Sure Diagnostics — Payment Export"])
     ws.append([f"Generated: {datetime.utcnow().strftime('%d %b %Y %H:%M')} UTC"])
@@ -80,23 +79,43 @@ def export():
         cell.alignment = center
 
     for pr in records:
-        ws.append([
-            pr.reference,
-            pr.date.strftime("%d/%m/%Y"),
-            pr.branch.name   if pr.branch   else "",
-            pr.category.name if pr.category else "",
-            pr.description,
-            pr.quantity,
-            float(pr.rate),
-            float(pr.requested_amount),
-            float(pr.approved_amount) if pr.approved_amount else "",
-            pr.beneficiary_name,
-            pr.beneficiary_account,
-            pr.beneficiary_bank,
-            pr.bank_code or "",
-            pr.mds_comment or "",
-            pr.upload_status.replace("_", " ").title(),
-        ])
+        items = pr.items if pr.items else []
+        if not items:
+            ws.append([
+                pr.reference,
+                pr.date.strftime("%d/%m/%Y"),
+                pr.branch.name if pr.branch else "",
+                "", "", "", "", "", "",
+                float(pr.requested_amount),
+                float(pr.approved_amount) if pr.approved_amount else "",
+                pr.beneficiary_name,
+                pr.beneficiary_account,
+                pr.beneficiary_bank,
+                pr.bank_code or "",
+                pr.mds_comment or "",
+                pr.upload_status.replace("_", " ").title(),
+            ])
+        else:
+            for i, item in enumerate(items):
+                ws.append([
+                    pr.reference if i == 0 else "",
+                    pr.date.strftime("%d/%m/%Y") if i == 0 else "",
+                    (pr.branch.name if pr.branch else "") if i == 0 else "",
+                    item.category.name if item.category else "",
+                    item.category.cost_type.replace("_", " ").title() if item.category else "",
+                    item.description,
+                    item.quantity,
+                    float(item.rate),
+                    float(item.amount),
+                    float(pr.requested_amount) if i == 0 else "",
+                    (float(pr.approved_amount) if pr.approved_amount else "") if i == 0 else "",
+                    pr.beneficiary_name if i == 0 else "",
+                    pr.beneficiary_account if i == 0 else "",
+                    pr.beneficiary_bank if i == 0 else "",
+                    (pr.bank_code or "") if i == 0 else "",
+                    (pr.mds_comment or "") if i == 0 else "",
+                    pr.upload_status.replace("_", " ").title() if i == 0 else "",
+                ])
 
     for col in ws.columns:
         max_len = max((len(str(cell.value or "")) for cell in col), default=10)

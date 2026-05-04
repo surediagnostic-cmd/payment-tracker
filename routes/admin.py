@@ -66,13 +66,16 @@ def toggle_branch(branch_id):
 @_mds_required
 def add_category():
     name = request.form.get("name", "").strip()
+    cost_type = request.form.get("cost_type", "overhead")
+    if cost_type not in ("direct_cost", "overhead"):
+        cost_type = "overhead"
     if not name:
         flash("Category name is required.", "error")
         return redirect(url_for("admin.admin"))
     if Category.query.filter_by(name=name).first():
         flash(f"Category '{name}' already exists.", "error")
         return redirect(url_for("admin.admin"))
-    db.session.add(Category(name=name))
+    db.session.add(Category(name=name, cost_type=cost_type))
     db.session.commit()
     flash(f"Category '{name}' added.", "success")
     return redirect(url_for("admin.admin"))
@@ -99,7 +102,7 @@ def add_user():
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "").strip()
     role = request.form.get("role", "accountant")
-    branch_id = request.form.get("branch_id", type=int)
+    branch_ids = request.form.getlist("branch_ids[]", type=int)
 
     if not all([name, email, password]):
         flash("Name, email, and password are required.", "error")
@@ -109,12 +112,43 @@ def add_user():
         return redirect(url_for("admin.admin"))
 
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    db.session.add(User(
-        name=name, email=email, password_hash=pw_hash, role=role,
-        branch_id=branch_id if role == "accountant" else None
-    ))
+    user = User(name=name, email=email, password_hash=pw_hash, role=role)
+    if role == "accountant" and branch_ids:
+        user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all()
+    db.session.add(user)
     db.session.commit()
     flash(f"User '{name}' created.", "success")
+    return redirect(url_for("admin.admin"))
+
+
+@admin_bp.route("/admin/users/<int:user_id>/edit", methods=["POST"])
+@login_required
+@_mds_required
+def edit_user(user_id):
+    user = User.query.get_or_404(user_id)
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    role = request.form.get("role", user.role)
+    branch_ids = request.form.getlist("branch_ids[]", type=int)
+
+    if not name or not email:
+        flash("Name and email are required.", "error")
+        return redirect(url_for("admin.admin"))
+
+    existing = User.query.filter_by(email=email).first()
+    if existing and existing.id != user.id:
+        flash(f"Email '{email}' is already used by another account.", "error")
+        return redirect(url_for("admin.admin"))
+
+    user.name = name
+    user.email = email
+    user.role = role
+    if role == "accountant":
+        user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all() if branch_ids else []
+    else:
+        user.branches = []
+    db.session.commit()
+    flash(f"User '{user.name}' updated.", "success")
     return redirect(url_for("admin.admin"))
 
 
