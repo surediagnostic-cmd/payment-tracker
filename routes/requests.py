@@ -4,6 +4,7 @@ from decimal import Decimal
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
+from sqlalchemy.orm import subqueryload, joinedload
 from app import db
 from models import PaymentRequest, PaymentRequestItem, Branch, Category, User
 from utils import send_email
@@ -24,9 +25,41 @@ def _parse_month(month_str):
     return now.year, now.month
 
 
+def _eager_pr():
+    """Return a base query that pre-loads all lazy relationships."""
+    return PaymentRequest.query.options(
+        subqueryload(PaymentRequest.items).joinedload(PaymentRequestItem.category),
+        joinedload(PaymentRequest.branch),
+        joinedload(PaymentRequest.submitter),
+    )
+
+
 @requests_bp.route("/dashboard")
 @login_required
 def dashboard():
+    try:
+        return _dashboard_inner()
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"[dashboard error]: {e}", flush=True)
+        flash(f"Dashboard error (DB may be initialising): {str(e)}", "error")
+        # Render a bare-bones safe fallback
+        return render_template(
+            "dashboard.html",
+            month_str="", month_label="—", selected_branch=None,
+            branches=[], pending=[], total_approved=0, total_pending_amt=0,
+            approval_rate=0, status_counts={"pending":0,"approved":0,"rejected":0,"uploaded":0},
+            branch_totals=[], branch_requests={}, total_direct_cost=0, total_overhead=0,
+            category_data=[], variance_data=[], recent=[],
+            user_branches=[], my_requests=[], my_pending=0,
+            my_total=0, approved_count=0,
+        )
+
+
+def _dashboard_inner():
     month_str      = request.args.get("month", "")
     selected_branch = request.args.get("branch_id", type=int)
     yr, mo = _parse_month(month_str)
@@ -42,7 +75,7 @@ def dashboard():
 
     if current_user.is_mds:
         # ── Pending (no month filter — show all pending) ─────────────────────
-        pending_q = PaymentRequest.query.filter_by(status="pending").order_by(PaymentRequest.created_at.desc())
+        pending_q = _eager_pr().filter_by(status="pending").order_by(PaymentRequest.created_at.desc())
         if selected_branch:
             pending_q = pending_q.filter_by(branch_id=selected_branch)
         pending = pending_q.all()
@@ -103,7 +136,7 @@ def dashboard():
             .order_by(func.sum(PaymentRequest.approved_amount).desc()).all()
 
         # ── Per-branch request details (for accordion) ────────────────────────
-        all_br_q = PaymentRequest.query.filter(PaymentRequest.status.in_(["approved", "pending"]))
+        all_br_q = _eager_pr().filter(PaymentRequest.status.in_(["approved", "pending"]))
         all_br_q = month_filter(all_br_q)
         if selected_branch:
             all_br_q = all_br_q.filter_by(branch_id=selected_branch)
@@ -143,7 +176,7 @@ def dashboard():
         total_overhead    = _cost_total("overhead")
 
         # ── Variance ──────────────────────────────────────────────────────────
-        var_q = PaymentRequest.query.filter(
+        var_q = _eager_pr().filter(
             PaymentRequest.status == "approved",
             PaymentRequest.approved_amount != PaymentRequest.requested_amount,
         )
@@ -153,7 +186,7 @@ def dashboard():
         variance_data = var_q.order_by(PaymentRequest.date.desc()).limit(30).all()
 
         # ── Recent ────────────────────────────────────────────────────────────
-        recent_q = PaymentRequest.query
+        recent_q = _eager_pr()
         recent_q = month_filter(recent_q)
         if selected_branch:
             recent_q = recent_q.filter_by(branch_id=selected_branch)
@@ -183,7 +216,7 @@ def dashboard():
         else:
             acct_branch_filter = None
 
-        my_q = PaymentRequest.query.filter_by(submitted_by=current_user.id)
+        my_q = _eager_pr().filter_by(submitted_by=current_user.id)
         my_q = month_filter(my_q)
         if acct_branch_filter:
             my_q = my_q.filter_by(branch_id=acct_branch_filter)
@@ -370,7 +403,7 @@ def delete_request(req_id):
 @requests_bp.route("/requests")
 @login_required
 def list_requests():
-    q = PaymentRequest.query
+    q = _eager_pr()
     if not current_user.is_mds:
         q = q.filter_by(submitted_by=current_user.id)
 

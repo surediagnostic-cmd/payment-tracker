@@ -22,6 +22,11 @@ def create_app():
             "SQLALCHEMY_DATABASE_URI"
         ].replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    # Supabase/PgBouncer closes idle connections — pre-ping keeps pool healthy
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,   # recycle before Supabase's 300s idle timeout
+    }
 
     app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", 587))
