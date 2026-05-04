@@ -51,13 +51,16 @@ def create_app():
     app.register_blueprint(reports_bp)
     app.register_blueprint(admin_bp)
 
-    @app.before_request
-    def _init_db():
-        # Runs once on the first real request so gunicorn starts cleanly
-        if not getattr(app, "_db_ready", False):
+    @app.route("/health")
+    def health():
+        return "ok", 200
+
+    with app.app_context():
+        try:
             db.create_all()
             _seed_defaults()
-            app._db_ready = True
+        except Exception as e:
+            print(f"[startup] DB init warning: {e}", flush=True)
 
     return app
 
