@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime, date
 from decimal import Decimal
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
@@ -26,13 +27,12 @@ def _parse_month(month_str):
 @requests_bp.route("/dashboard")
 @login_required
 def dashboard():
-    month_str = request.args.get("month", "")
+    month_str      = request.args.get("month", "")
     selected_branch = request.args.get("branch_id", type=int)
     yr, mo = _parse_month(month_str)
     month_label = date(yr, mo, 1).strftime("%B %Y") if mo else f"All of {yr}"
 
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
-    categories = Category.query.filter_by(is_active=True).all()
 
     def month_filter(q):
         q = q.filter(func.extract("year", PaymentRequest.date) == yr)
@@ -41,29 +41,36 @@ def dashboard():
         return q
 
     if current_user.is_mds:
+        # ── Pending (no month filter — show all pending) ─────────────────────
         pending_q = PaymentRequest.query.filter_by(status="pending").order_by(PaymentRequest.created_at.desc())
         if selected_branch:
             pending_q = pending_q.filter_by(branch_id=selected_branch)
         pending = pending_q.all()
 
+        # ── Approved this period ──────────────────────────────────────────────
         approved_q = PaymentRequest.query.filter_by(status="approved")
         approved_q = month_filter(approved_q)
         if selected_branch:
             approved_q = approved_q.filter_by(branch_id=selected_branch)
         approved_this_month = approved_q.all()
         total_approved = sum(float(r.approved_amount or 0) for r in approved_this_month)
-        total_pending_amt = sum(float(r.requested_amount) for r in PaymentRequest.query.filter_by(status="pending").all())
+        total_pending_amt = sum(
+            float(r.requested_amount)
+            for r in PaymentRequest.query.filter_by(status="pending").all()
+        )
 
+        # ── Approval rate ─────────────────────────────────────────────────────
         reviewed = PaymentRequest.query.filter(PaymentRequest.status.in_(["approved", "rejected"]))
         reviewed = month_filter(reviewed)
         if selected_branch:
             reviewed = reviewed.filter_by(branch_id=selected_branch)
         reviewed_count = reviewed.count()
         approved_count = len(approved_this_month)
-        approval_rate = round((approved_count / reviewed_count) * 100) if reviewed_count else 0
+        approval_rate  = round((approved_count / reviewed_count) * 100) if reviewed_count else 0
 
-        def status_count(status):
-            q = PaymentRequest.query.filter_by(status=status)
+        # ── Status counts ─────────────────────────────────────────────────────
+        def status_count(s):
+            q = PaymentRequest.query.filter_by(status=s)
             q = month_filter(q)
             if selected_branch:
                 q = q.filter_by(branch_id=selected_branch)
@@ -74,32 +81,44 @@ def dashboard():
             uploaded_q = uploaded_q.filter_by(branch_id=selected_branch)
 
         status_counts = {
-            "pending": status_count("pending"),
+            "pending":  status_count("pending"),
             "approved": status_count("approved"),
             "rejected": status_count("rejected"),
             "uploaded": uploaded_q.count(),
         }
 
+        # ── Branch totals ─────────────────────────────────────────────────────
         branch_totals_q = db.session.query(
             Branch.name.label("branch"),
             func.sum(PaymentRequest.requested_amount).label("requested"),
             func.sum(PaymentRequest.approved_amount).label("approved"),
             func.count(PaymentRequest.id).label("count"),
-        ).join(Branch).filter(PaymentRequest.status.in_(["approved", "pending"]))
+        ).select_from(PaymentRequest)\
+         .join(Branch, Branch.id == PaymentRequest.branch_id)\
+         .filter(PaymentRequest.status.in_(["approved", "pending"]))
         branch_totals_q = month_filter(branch_totals_q)
         if selected_branch:
             branch_totals_q = branch_totals_q.filter(PaymentRequest.branch_id == selected_branch)
-        branch_totals = branch_totals_q.group_by(Branch.name).order_by(
-            func.sum(PaymentRequest.approved_amount).desc()
-        ).all()
+        branch_totals = branch_totals_q.group_by(Branch.name)\
+            .order_by(func.sum(PaymentRequest.approved_amount).desc()).all()
 
-        # Category breakdown via line items
+        # ── Per-branch request details (for accordion) ────────────────────────
+        all_br_q = PaymentRequest.query.filter(PaymentRequest.status.in_(["approved", "pending"]))
+        all_br_q = month_filter(all_br_q)
+        if selected_branch:
+            all_br_q = all_br_q.filter_by(branch_id=selected_branch)
+        branch_requests = defaultdict(list)
+        for r in all_br_q.order_by(PaymentRequest.branch_id, PaymentRequest.date.desc()).all():
+            branch_requests[r.branch.name].append(r)
+
+        # ── Category breakdown via line items ─────────────────────────────────
         cat_q = db.session.query(
             Category.name,
             Category.cost_type,
             func.sum(PaymentRequestItem.amount).label("total"),
             func.count(PaymentRequestItem.id).label("count"),
-        ).join(PaymentRequestItem, Category.id == PaymentRequestItem.category_id)\
+        ).select_from(PaymentRequestItem)\
+         .join(Category, Category.id == PaymentRequestItem.category_id)\
          .join(PaymentRequest, PaymentRequest.id == PaymentRequestItem.request_id)\
          .filter(PaymentRequest.status == "approved")
         cat_q = month_filter(cat_q)
@@ -108,6 +127,22 @@ def dashboard():
         category_data = cat_q.group_by(Category.name, Category.cost_type)\
                              .order_by(func.sum(PaymentRequestItem.amount).desc()).all()
 
+        # ── Direct cost / overhead totals ─────────────────────────────────────
+        def _cost_total(cost_type):
+            q = db.session.query(func.sum(PaymentRequestItem.amount))\
+                .select_from(PaymentRequestItem)\
+                .join(Category, Category.id == PaymentRequestItem.category_id)\
+                .join(PaymentRequest, PaymentRequest.id == PaymentRequestItem.request_id)\
+                .filter(PaymentRequest.status == "approved", Category.cost_type == cost_type)
+            q = month_filter(q)
+            if selected_branch:
+                q = q.filter(PaymentRequest.branch_id == selected_branch)
+            return float(q.scalar() or 0)
+
+        total_direct_cost = _cost_total("direct_cost")
+        total_overhead    = _cost_total("overhead")
+
+        # ── Variance ──────────────────────────────────────────────────────────
         var_q = PaymentRequest.query.filter(
             PaymentRequest.status == "approved",
             PaymentRequest.approved_amount != PaymentRequest.requested_amount,
@@ -117,6 +152,7 @@ def dashboard():
             var_q = var_q.filter_by(branch_id=selected_branch)
         variance_data = var_q.order_by(PaymentRequest.date.desc()).limit(30).all()
 
+        # ── Recent ────────────────────────────────────────────────────────────
         recent_q = PaymentRequest.query
         recent_q = month_filter(recent_q)
         if selected_branch:
@@ -131,14 +167,26 @@ def dashboard():
             pending=pending, total_approved=total_approved,
             total_pending_amt=total_pending_amt, approval_rate=approval_rate,
             status_counts=status_counts, branch_totals=branch_totals,
+            branch_requests=branch_requests,
+            total_direct_cost=total_direct_cost, total_overhead=total_overhead,
             category_data=category_data, variance_data=variance_data, recent=recent,
         )
 
     else:
-        # Accountant — filter by all their branches
-        user_branch_ids = [b.id for b in current_user.branches]
+        # ── Accountant dashboard ──────────────────────────────────────────────
+        user_branches    = current_user.branches
+        user_branch_ids  = [b.id for b in user_branches]
+
+        # Branch filter (relevant when accountant assigned to multiple branches)
+        if selected_branch and selected_branch in user_branch_ids:
+            acct_branch_filter = selected_branch
+        else:
+            acct_branch_filter = None
+
         my_q = PaymentRequest.query.filter_by(submitted_by=current_user.id)
         my_q = month_filter(my_q)
+        if acct_branch_filter:
+            my_q = my_q.filter_by(branch_id=acct_branch_filter)
         my_requests = my_q.order_by(PaymentRequest.created_at.desc()).all()
 
         my_pending  = sum(1 for r in my_requests if r.status == "pending")
@@ -150,10 +198,14 @@ def dashboard():
             Category.cost_type,
             func.sum(PaymentRequestItem.amount).label("total"),
             func.count(PaymentRequestItem.id).label("count"),
-        ).join(PaymentRequestItem, Category.id == PaymentRequestItem.category_id)\
+        ).select_from(PaymentRequestItem)\
+         .join(Category, Category.id == PaymentRequestItem.category_id)\
          .join(PaymentRequest, PaymentRequest.id == PaymentRequestItem.request_id)\
-         .filter(PaymentRequest.status == "approved", PaymentRequest.submitted_by == current_user.id)
+         .filter(PaymentRequest.status == "approved",
+                 PaymentRequest.submitted_by == current_user.id)
         cat_q = month_filter(cat_q)
+        if acct_branch_filter:
+            cat_q = cat_q.filter(PaymentRequest.branch_id == acct_branch_filter)
         category_data = cat_q.group_by(Category.name, Category.cost_type)\
                              .order_by(func.sum(PaymentRequestItem.amount).desc()).all()
 
@@ -168,7 +220,8 @@ def dashboard():
         return render_template(
             "dashboard.html",
             month_str=effective_month_str, month_label=month_label,
-            selected_branch=None, branches=branches,
+            selected_branch=acct_branch_filter, branches=branches,
+            user_branches=user_branches,
             my_requests=my_requests, my_pending=my_pending,
             my_total=my_total, approved_count=len(my_approved),
             category_data=category_data, status_counts=status_counts,
@@ -219,9 +272,9 @@ def new_request():
                 items_data.append({
                     "description": desc,
                     "category_id": int(category_ids[i]),
-                    "quantity": qty,
-                    "rate": rate,
-                    "amount": amount,
+                    "quantity":    qty,
+                    "rate":        rate,
+                    "amount":      amount,
                 })
 
             ref = PaymentRequest.generate_reference(branch_id)
@@ -294,6 +347,20 @@ def mark_uploaded(req_id):
     db.session.commit()
     flash(f"{pr.reference} marked as uploaded.", "success")
     return redirect(url_for("requests.dashboard"))
+
+
+@requests_bp.route("/requests/<int:req_id>/delete", methods=["POST"])
+@login_required
+def delete_request(req_id):
+    if not current_user.is_mds:
+        flash("Only MDS can delete payment requests.", "error")
+        return redirect(url_for("requests.dashboard"))
+    pr = PaymentRequest.query.get_or_404(req_id)
+    ref = pr.reference
+    db.session.delete(pr)
+    db.session.commit()
+    flash(f"Payment request {ref} has been permanently deleted.", "warning")
+    return redirect(url_for("requests.list_requests"))
 
 
 @requests_bp.route("/requests")

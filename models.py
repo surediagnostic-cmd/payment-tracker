@@ -43,6 +43,11 @@ class User(UserMixin, db.Model):
     def is_mds(self):
         return self.role == "mds"
 
+    @property
+    def branch(self):
+        """Backward-compat helper — returns the first assigned branch or None."""
+        return self.branches[0] if self.branches else None
+
 
 class PaymentRequest(db.Model):
     __tablename__ = "payment_requests"

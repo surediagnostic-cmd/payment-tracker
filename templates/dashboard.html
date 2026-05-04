@@ -92,7 +92,9 @@ function applyFilter() {
 ══════════════════════════════════════ -->
 
 <!-- KPI Row -->
-<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:28px;">
+{% set _list_base = url_for('requests.list_requests') + '?month=' + month_str %}
+{% if selected_branch %}{% set _list_base = _list_base + '&branch_id=' + selected_branch|string %}{% endif %}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:28px;">
   <div class="kpi-card" style="border-left:3px solid var(--amber);">
     <div class="kpi-label">All Pending</div>
     <div class="kpi-value" style="color:var(--amber);">{{ pending | length }}</div>
@@ -111,32 +113,42 @@ function applyFilter() {
   <div class="kpi-card" style="border-left:3px solid var(--blue);">
     <div class="kpi-label">Approval Rate</div>
     <div class="kpi-value" style="color:var(--blue2);">{{ approval_rate }}%</div>
-    <div class="kpi-sub">Of reviewed this month</div>
+    <div class="kpi-sub">Of reviewed {{ month_label }}</div>
+  </div>
+  <div class="kpi-card" style="border-left:3px solid var(--red);">
+    <div class="kpi-label">Direct Costs — {{ month_label }}</div>
+    <div class="kpi-value" style="color:var(--red); font-size:20px;">₦{{ "{:,.0f}".format(total_direct_cost) }}</div>
+    <div class="kpi-sub">Approved direct costs</div>
+  </div>
+  <div class="kpi-card" style="border-left:3px solid var(--muted);">
+    <div class="kpi-label">Overhead — {{ month_label }}</div>
+    <div class="kpi-value" style="color:var(--muted); font-size:20px;">₦{{ "{:,.0f}".format(total_overhead) }}</div>
+    <div class="kpi-sub">Approved overhead</div>
   </div>
 </div>
 
-<!-- Status Tracker pills -->
+<!-- Status Tracker pills (clickable) -->
 <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:28px;">
-  <div style="display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(245,158,11,.3); border-radius:100px;">
+  <a href="{{ _list_base }}&status=pending" style="text-decoration:none; display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(245,158,11,.3); border-radius:100px; cursor:pointer; transition:border-color .2s;" onmouseover="this.style.borderColor='var(--amber)'" onmouseout="this.style.borderColor='rgba(245,158,11,.3)'">
     <span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:block;"></span>
     <span style="font-size:12px; color:var(--muted);">Pending</span>
     <span style="font-weight:800; color:var(--amber);">{{ status_counts.pending }}</span>
-  </div>
-  <div style="display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(34,197,94,.25); border-radius:100px;">
+  </a>
+  <a href="{{ _list_base }}&status=approved" style="text-decoration:none; display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(34,197,94,.25); border-radius:100px; cursor:pointer; transition:border-color .2s;" onmouseover="this.style.borderColor='var(--green)'" onmouseout="this.style.borderColor='rgba(34,197,94,.25)'">
     <span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:block;"></span>
     <span style="font-size:12px; color:var(--muted);">Approved</span>
     <span style="font-weight:800; color:var(--green);">{{ status_counts.approved }}</span>
-  </div>
-  <div style="display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(239,68,68,.3); border-radius:100px;">
+  </a>
+  <a href="{{ _list_base }}&status=rejected" style="text-decoration:none; display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(239,68,68,.3); border-radius:100px; cursor:pointer; transition:border-color .2s;" onmouseover="this.style.borderColor='var(--red)'" onmouseout="this.style.borderColor='rgba(239,68,68,.3)'">
     <span style="width:8px;height:8px;border-radius:50%;background:var(--red);display:block;"></span>
     <span style="font-size:12px; color:var(--muted);">Rejected</span>
     <span style="font-weight:800; color:var(--red);">{{ status_counts.rejected }}</span>
-  </div>
-  <div style="display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(245,130,31,.3); border-radius:100px;">
+  </a>
+  <a href="{{ _list_base }}" style="text-decoration:none; display:flex; align-items:center; gap:8px; padding:10px 18px; background:var(--card); border:1px solid rgba(245,130,31,.3); border-radius:100px; cursor:pointer; transition:border-color .2s;" onmouseover="this.style.borderColor='var(--orange)'" onmouseout="this.style.borderColor='rgba(245,130,31,.3)'">
     <span style="width:8px;height:8px;border-radius:50%;background:var(--orange);display:block;"></span>
     <span style="font-size:12px; color:var(--muted);">Uploaded</span>
     <span style="font-weight:800; color:var(--orange2);">{{ status_counts.uploaded }}</span>
-  </div>
+  </a>
 </div>
 
 <!-- Charts Row -->
@@ -198,13 +210,13 @@ function applyFilter() {
 </div>
 {% endif %}
 
-<!-- Branch Summary Table -->
+<!-- Branch Summary Table (accordion) -->
 {% if branch_totals %}
 <div style="margin-bottom:28px;">
-  <div style="font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:12px;">{{ month_label }} — Branch Summary</div>
+  <div style="font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:12px;">{{ month_label }} — Branch Summary <span style="color:var(--dim); font-size:11px; text-transform:none; letter-spacing:0;">(click a branch to expand)</span></div>
   <div class="card" style="overflow:hidden;">
-    <table>
-      <thead><tr><th>Branch</th><th>Transactions</th><th>Requested (₦)</th><th>Approved (₦)</th><th>Variance (₦)</th><th>Approval %</th></tr></thead>
+    <table id="branchSummaryTable">
+      <thead><tr><th></th><th>Branch</th><th>Requests</th><th>Requested (₦)</th><th>Approved (₦)</th><th>Variance (₦)</th><th>Approval %</th></tr></thead>
       <tbody>
         {% set ns = namespace(tr=0, ta=0, tc=0) %}
         {% for row in branch_totals %}
@@ -212,7 +224,12 @@ function applyFilter() {
         {% set app = (row.approved or 0) | float %}
         {% set pct = (app / req * 100) if req else 0 %}
         {% set ns.tr = ns.tr + req %}{% set ns.ta = ns.ta + app %}{% set ns.tc = ns.tc + row.count %}
-        <tr>
+        {% set safe_id = row.branch | replace(' ','_') | replace('/','_') %}
+        <!-- Branch summary row -->
+        <tr style="cursor:pointer;" onclick="toggleBranchDetail('{{ safe_id }}')" title="Click to expand">
+          <td style="width:28px; color:var(--orange2);">
+            <span id="chevron-{{ safe_id }}" style="display:inline-block; transition:transform .2s;">▶</span>
+          </td>
           <td><span class="badge badge-blue">{{ row.branch }}</span></td>
           <td style="color:var(--muted);">{{ row.count }}</td>
           <td>{{ "{:,.2f}".format(req) }}</td>
@@ -229,8 +246,45 @@ function applyFilter() {
             </div>
           </td>
         </tr>
+        <!-- Branch detail rows (hidden by default) -->
+        {% set branch_reqs = branch_requests.get(row.branch, []) %}
+        {% if branch_reqs %}
+        <tr id="detail-{{ safe_id }}" style="display:none;">
+          <td colspan="7" style="padding:0; background:var(--bg2);">
+            <table style="width:100%; border-top:2px solid var(--orange-d);">
+              <thead>
+                <tr style="background:rgba(245,130,31,.06);">
+                  <th style="padding-left:32px;">Reference</th>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Beneficiary</th>
+                  <th style="text-align:right;">Requested (₦)</th>
+                  <th style="text-align:right;">Approved (₦)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for pr in branch_reqs %}
+                <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'">
+                  <td style="padding-left:32px;"><span style="font-family:monospace; color:var(--orange2); font-size:11px;">{{ pr.reference }}</span></td>
+                  <td style="color:var(--muted); font-size:12px; white-space:nowrap;">{{ pr.date.strftime("%d %b %Y") }}</td>
+                  <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">
+                    {{ pr.items[0].description if pr.items else "—" }}{% if pr.items|length > 1 %} <span style="color:var(--dim);">(+{{ pr.items|length - 1 }})</span>{% endif %}
+                  </td>
+                  <td style="font-size:12px; color:var(--muted);">{{ pr.beneficiary_name }}</td>
+                  <td style="text-align:right; font-size:12px;">{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
+                  <td style="text-align:right; font-size:12px; color:var(--green); font-weight:700;">{% if pr.approved_amount %}{{ "{:,.2f}".format(pr.approved_amount | float) }}{% else %}—{% endif %}</td>
+                  <td><span class="badge badge-{{ pr.status_color }}" style="font-size:10px;">{{ pr.status | title }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
         <tr style="border-top:2px solid var(--border2); background:var(--bg2);">
+          <td></td>
           <td style="font-weight:700; color:var(--white);">TOTAL</td>
           <td style="font-weight:700;">{{ ns.tc }}</td>
           <td style="font-weight:700;">{{ "{:,.2f}".format(ns.tr) }}</td>
@@ -338,6 +392,17 @@ function applyFilter() {
      ACCOUNTANT DASHBOARD
 ══════════════════════════════════════ -->
 
+<!-- Branch filter (only shown when accountant has multiple branches) -->
+{% if user_branches and user_branches | length > 1 %}
+<div style="margin-bottom:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+  {% set _acct_base = url_for('requests.dashboard') + '?month=' + month_str %}
+  <a href="{{ _acct_base }}" class="pill-filter {% if not selected_branch %}active{% endif %}">All Branches</a>
+  {% for b in user_branches %}
+  <a href="{{ _acct_base }}&branch_id={{ b.id }}" class="pill-filter {% if selected_branch == b.id %}active{% endif %}">{{ b.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
 <!-- KPIs -->
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px;">
   <div class="kpi-card" style="border-left:3px solid var(--amber);">
@@ -362,14 +427,16 @@ function applyFilter() {
   </div>
 </div>
 
-<!-- Status pills -->
+<!-- Status pills (clickable) -->
+{% set _al = url_for('requests.list_requests') + '?month=' + month_str %}
+{% if selected_branch %}{% set _al = _al + '&branch_id=' + selected_branch|string %}{% endif %}
 <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:24px;">
-  {% for label, key, color in [("Pending","pending","amber"),("Approved","approved","green"),("Rejected","rejected","red"),("Uploaded","uploaded","orange")] %}
-  <div style="display:flex; align-items:center; gap:8px; padding:8px 16px; background:var(--card); border:1px solid var(--border); border-radius:100px;">
+  {% for label, key, color, qs in [("Pending","pending","amber","pending"),("Approved","approved","green","approved"),("Rejected","rejected","red","rejected"),("Uploaded","uploaded","orange","")] %}
+  <a href="{{ _al }}{% if qs %}&status={{ qs }}{% endif %}" style="text-decoration:none; display:flex; align-items:center; gap:8px; padding:8px 16px; background:var(--card); border:1px solid var(--border); border-radius:100px;">
     <span style="width:7px;height:7px;border-radius:50%;background:var(--{{ color }});display:block;"></span>
     <span style="font-size:12px; color:var(--muted);">{{ label }}</span>
     <span style="font-weight:800; color:var(--{{ color }});">{{ status_counts[key] }}</span>
-  </div>
+  </a>
   {% endfor %}
 </div>
 
@@ -504,6 +571,16 @@ new Chart(document.getElementById('categoryChart'), {
   }
 });
 {% endif %}
+
+// Branch accordion
+function toggleBranchDetail(id) {
+  const detail = document.getElementById('detail-' + id);
+  const chevron = document.getElementById('chevron-' + id);
+  if (!detail) return;
+  const isOpen = detail.style.display !== 'none';
+  detail.style.display = isOpen ? 'none' : 'table-row';
+  chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
+}
 </script>
 
 {% endblock %}
