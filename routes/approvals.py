@@ -2,8 +2,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_required, current_user
+from sqlalchemy.orm import subqueryload, joinedload
 from app import db
-from models import PaymentRequest, User
+from models import PaymentRequest, PaymentRequestItem, User
 from utils import send_email
 
 approvals_bp = Blueprint("approvals", __name__)
@@ -24,7 +25,11 @@ def _mds_required(f):
 @login_required
 @_mds_required
 def review(req_id):
-    pr = PaymentRequest.query.get_or_404(req_id)
+    pr = PaymentRequest.query.options(
+        subqueryload(PaymentRequest.items).joinedload(PaymentRequestItem.category),
+        joinedload(PaymentRequest.branch),
+        joinedload(PaymentRequest.submitter),
+    ).filter_by(id=req_id).first_or_404()
 
     if request.method == "POST":
         try:
@@ -35,13 +40,10 @@ def review(req_id):
                 flash("Invalid action.", "error")
                 return redirect(url_for("approvals.review", req_id=req_id))
 
-            try:
-                item_lines = "\n".join(
-                    f"  • {it.description} ({it.category.name}) — ₦{it.amount:,.2f}"
-                    for it in pr.items
-                )
-            except Exception:
-                item_lines = "(item details unavailable)"
+            item_lines = "\n".join(
+                f"  • {it.description} ({it.category.name}) — ₦{it.amount:,.2f}"
+                for it in pr.items
+            ) or "(no items)"
 
             if action == "approve":
                 approved_str = request.form.get("approved_amount", "").replace(",", "")

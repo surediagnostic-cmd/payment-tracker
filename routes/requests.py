@@ -366,7 +366,7 @@ def new_request():
 @requests_bp.route("/requests/<int:req_id>")
 @login_required
 def view_request(req_id):
-    pr = PaymentRequest.query.get_or_404(req_id)
+    pr = _eager_pr().filter_by(id=req_id).first_or_404()
     if not current_user.is_mds and pr.submitted_by != current_user.id:
         flash("Access denied.", "error")
         return redirect(url_for("requests.dashboard"))

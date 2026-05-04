@@ -71,13 +71,18 @@ class PaymentRequest(db.Model):
 
     @staticmethod
     def generate_reference(branch_id):
-        from sqlalchemy import func
         now = datetime.now(timezone.utc)
         prefix = f"PAY-{now.strftime('%Y%m')}"
-        count = db.session.query(func.count(PaymentRequest.id)).filter(
-            PaymentRequest.reference.like(f"{prefix}%")
-        ).scalar() or 0
-        return f"{prefix}-{str(count + 1).zfill(3)}"
+        # Use MAX over the numeric suffix so gaps/ghost rows don't collide
+        existing = db.session.query(PaymentRequest.reference)\
+            .filter(PaymentRequest.reference.like(f"{prefix}-%")).all()
+        max_num = 0
+        for (ref,) in existing:
+            try:
+                max_num = max(max_num, int(ref.rsplit("-", 1)[-1]))
+            except (ValueError, IndexError):
+                pass
+        return f"{prefix}-{str(max_num + 1).zfill(3)}"
 
     @property
     def status_color(self):
