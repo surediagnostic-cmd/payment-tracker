@@ -55,13 +55,57 @@ def create_app():
     def health():
         return "ok", 200
 
+    @app.errorhandler(500)
+    def internal_error(error):
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[500 ERROR]\n{tb}", flush=True)
+        db.session.rollback()
+        try:
+            from flask import render_template as rt
+            return rt("500.html", error=str(error), traceback=tb), 500
+        except Exception:
+            return f"<pre style='padding:20px;'>500 Internal Server Error\n\n{tb}</pre>", 500
+
     with app.app_context():
+        # Step 1 — migrations (schema changes to existing tables)
         try:
             _run_migrations()
+        except Exception as e:
+            print(f"[startup] migration warning: {e}", flush=True)
+
+        # Step 2 — always create missing tables, even if migrations failed
+        try:
             db.create_all()
+        except Exception as e:
+            print(f"[startup] db.create_all warning: {e}", flush=True)
+
+        # Step 3 — seed default data if tables are empty
+        try:
             _seed_defaults()
         except Exception as e:
-            print(f"[startup] DB init warning: {e}", flush=True)
+            print(f"[startup] seed warning: {e}", flush=True)
+
+    @app.route("/debug-db")
+    def debug_db():
+        from flask_login import current_user
+        # Only allow MDS or unauthenticated access during setup
+        try:
+            from sqlalchemy import text, inspect as sa_inspect
+            insp = sa_inspect(db.engine)
+            tables = sorted(insp.get_table_names())
+            rows = {}
+            for t in tables:
+                try:
+                    count = db.session.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+                    cols  = [c['name'] for c in insp.get_columns(t)]
+                    rows[t] = {"count": count, "columns": cols}
+                except Exception as e:
+                    rows[t] = {"error": str(e)}
+            import json
+            return f"<pre style='font-family:monospace;font-size:13px;padding:20px;'>{json.dumps({'tables': rows}, indent=2)}</pre>", 200
+        except Exception as e:
+            return f"<pre>debug error: {e}</pre>", 500
 
     return app
 
