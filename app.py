@@ -3,6 +3,7 @@ from flask import Flask, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_mail import Mail
+from sqlalchemy.pool import NullPool
 
 db = SQLAlchemy()
 login_manager = LoginManager()
@@ -22,11 +23,9 @@ def create_app():
             "SQLALCHEMY_DATABASE_URI"
         ].replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    # Supabase/PgBouncer closes idle connections — pre-ping keeps pool healthy
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_pre_ping": True,
-        "pool_recycle": 280,   # recycle before Supabase's 300s idle timeout
-    }
+    # NullPool: no connection reuse — safest option for Supabase/PgBouncer
+    # Each request gets a fresh connection; eliminates all stale-conn 500s
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
     app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", 587))
@@ -209,6 +208,20 @@ def _run_migrations():
                 except Exception as e2:
                     db.session.rollback()
                     print(f"[migration] payment_requests schema update failed: {e2}")
+
+    # 4. Add receipt_filename column if missing
+    if 'payment_requests' in tables:
+        pr_cols = {c['name'] for c in insp.get_columns('payment_requests')}
+        if 'receipt_filename' not in pr_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_requests ADD COLUMN receipt_filename VARCHAR(255)"
+                ))
+                db.session.commit()
+                print("[migration] added receipt_filename column")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] receipt_filename: {e}")
 
 
 def _seed_defaults():

@@ -45,18 +45,16 @@ def dashboard():
         except Exception:
             pass
         print(f"[dashboard error]: {e}", flush=True)
-        flash(f"Dashboard error (DB may be initialising): {str(e)}", "error")
-        # Render a bare-bones safe fallback
-        return render_template(
-            "dashboard.html",
-            month_str="", month_label="—", selected_branch=None,
-            branches=[], pending=[], total_approved=0, total_pending_amt=0,
-            approval_rate=0, status_counts={"pending":0,"approved":0,"rejected":0,"uploaded":0},
-            branch_totals=[], branch_requests={}, total_direct_cost=0, total_overhead=0,
-            category_data=[], variance_data=[], recent=[],
-            user_branches=[], my_requests=[], my_pending=0,
-            my_total=0, approved_count=0,
-        )
+        # Return plain HTML — avoids Jinja2/DB dependency in the fallback
+        return (
+            f"<html><body style='font-family:sans-serif;padding:40px;"
+            f"background:#0b1e3d;color:#e8edf5;'>"
+            f"<h2 style='color:#f5821f;'>Dashboard temporarily unavailable</h2>"
+            f"<p style='color:#7a9cc4;margin:12px 0;'>Error: {str(e)}</p>"
+            f"<a href='/dashboard' style='color:#ff9d45;margin-right:20px;'>↺ Retry</a>"
+            f"<a href='/requests' style='color:#ff9d45;'>All Payments →</a>"
+            f"</body></html>"
+        ), 200
 
 
 def _dashboard_inner():
@@ -380,10 +378,110 @@ def mark_uploaded(req_id):
     if pr.status != "approved":
         flash("Only approved requests can be marked as uploaded.", "error")
         return redirect(url_for("requests.view_request", req_id=req_id))
+
+    # Optional receipt file upload
+    file = request.files.get("receipt")
+    if file and file.filename:
+        import os, uuid
+        from werkzeug.utils import secure_filename
+        upload_dir = os.path.join(current_app.root_path, "static", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        ext = os.path.splitext(secure_filename(file.filename))[1].lower()
+        filename = f"{pr.reference}_{uuid.uuid4().hex[:8]}{ext}"
+        file.save(os.path.join(upload_dir, filename))
+        pr.receipt_filename = filename
+
     pr.upload_status = "uploaded"
     db.session.commit()
     flash(f"{pr.reference} marked as uploaded.", "success")
-    return redirect(url_for("requests.dashboard"))
+    return redirect(url_for("requests.view_request", req_id=req_id))
+
+
+@requests_bp.route("/requests/template")
+@login_required
+def download_template():
+    """Download a blank Excel payment request template."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from flask import send_file
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Payment Request"
+
+    orange = "F5821F"
+    navy   = "0B1E3D"
+    lt     = "E8EDF5"
+    grey   = "F2F4F7"
+
+    # ── Header row ──────────────────────────────────────────────────────────
+    headers = [
+        "Date (YYYY-MM-DD)", "Branch", "Description", "Category",
+        "Quantity", "Rate (₦)", "Amount (₦)",
+        "Beneficiary Name", "Account Number", "Bank", "Bank Code",
+    ]
+    col_widths = [18, 14, 28, 22, 10, 14, 14, 24, 18, 18, 12]
+
+    for i, (h, w) in enumerate(zip(headers, col_widths), 1):
+        cell = ws.cell(row=1, column=i, value=h)
+        cell.font      = Font(bold=True, color=lt, name="Calibri", size=11)
+        cell.fill      = PatternFill("solid", fgColor=navy)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.column_dimensions[cell.column_letter].width = w
+    ws.row_dimensions[1].height = 30
+
+    # ── Sample row ───────────────────────────────────────────────────────────
+    sample = [
+        "2026-05-01", "Ijofi", "Lab reagents – CBC batch",
+        "Lab Supplies / Reagents", 2, 15000, "=F2*E2",
+        "Sigma-Aldrich NG", "0123456789", "Zenith Bank", "057",
+    ]
+    for i, v in enumerate(sample, 1):
+        cell = ws.cell(row=2, column=i, value=v)
+        cell.fill      = PatternFill("solid", fgColor=grey)
+        cell.alignment = Alignment(horizontal="center")
+        cell.font      = Font(name="Calibri", size=10, italic=True, color="555555")
+
+    # ── Blank data rows ───────────────────────────────────────────────────
+    for r in range(3, 22):
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(row=r, column=c, value="")
+            thin = Side(style="thin", color="D0D5DD")
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            cell.alignment = Alignment(horizontal="center")
+
+    # ── Instructions sheet ────────────────────────────────────────────────
+    wi = wb.create_sheet("Instructions")
+    notes = [
+        ("Sure Diagnostics — Payment Request Template", True, 14),
+        ("", False, 11),
+        ("HOW TO USE THIS TEMPLATE", True, 11),
+        ("1. Fill in one row per line item (you can have multiple items per payment).", False, 10),
+        ("2. Date must be in YYYY-MM-DD format (e.g. 2026-05-04).", False, 10),
+        ("3. Branch: Ijofi | OAUTH | ILASA | Palm Avenue | Ikeja", False, 10),
+        ("4. Amount = Quantity × Rate (formula auto-fills if you copy row 2).", False, 10),
+        ("5. Use the web app to submit — this template is for reference only.", False, 10),
+        ("", False, 10),
+        ("CATEGORIES", True, 11),
+        ("Lab Supplies / Reagents  |  Doctor's Payment  |  Staff Salary / Bonus", False, 10),
+        ("Equipment / Maintenance  |  Electricity / Utilities  |  Stationery / Office", False, 10),
+        ("Cleaning / Sanitation  |  Imprest / Float  |  X-Ray / Imaging  |  Other", False, 10),
+    ]
+    for row, (text, bold, size) in enumerate(notes, 1):
+        cell = wi.cell(row=row, column=1, value=text)
+        cell.font = Font(bold=bold, size=size, name="Calibri")
+    wi.column_dimensions["A"].width = 80
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="Sure_Diagnostics_Payment_Template.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @requests_bp.route("/requests/<int:req_id>/delete", methods=["POST"])
