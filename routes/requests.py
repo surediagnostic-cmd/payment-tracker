@@ -81,7 +81,7 @@ def dashboard():
         }
 
         branch_totals_q = db.session.query(
-            Branch.name,
+            Branch.name.label("branch"),
             func.sum(PaymentRequest.requested_amount).label("requested"),
             func.sum(PaymentRequest.approved_amount).label("approved"),
             func.count(PaymentRequest.id).label("count"),

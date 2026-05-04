@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}
-  {% if current_user.is_mds %}Payment Dashboard{% else %}My Payments — {{ current_user.branch.name if current_user.branch else "" }}{% endif %}
+  {% if current_user.is_mds %}Payment Dashboard{% else %}My Payments — {{ current_user.branches[0].name if current_user.branches else "" }}{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -180,8 +180,8 @@ function applyFilter() {
           <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
           <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b %Y") }}</td>
           <td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>
-          <td style="color:var(--muted); font-size:12px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.category.name }}</td>
-          <td style="max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.description }}</td>
+          <td style="color:var(--muted); font-size:12px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].category.name if pr.items else "—" }}</td>
+          <td style="max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].description if pr.items else "—" }}{% if pr.items|length > 1 %} <span style="color:var(--dim); font-size:11px;">(+{{ pr.items|length - 1 }} more)</span>{% endif %}</td>
           <td style="font-weight:700; color:var(--white);">{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
           <td style="color:var(--muted); font-size:12px;">{{ pr.submitter.name }}</td>
           <td><a href="{{ url_for('approvals.review', req_id=pr.id) }}" class="btn-primary" style="padding:5px 14px; font-size:12px;">Review</a></td>
@@ -289,7 +289,7 @@ function applyFilter() {
         <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'">
           <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
           <td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>
-          <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">{{ pr.description }}</td>
+          <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;">{{ pr.items[0].description if pr.items else "—" }}</td>
           <td>{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
           <td style="color:var(--green); font-weight:700;">{{ "{:,.2f}".format(pr.approved_amount | float) }}</td>
           <td style="color:var(--red); font-weight:700;">-{{ "{:,.2f}".format((pr.requested_amount - pr.approved_amount) | float) }}</td>
@@ -319,7 +319,7 @@ function applyFilter() {
           <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
           <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b") }}</td>
           <td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>
-          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.description }}</td>
+          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].description if pr.items else "—" }}</td>
           <td>{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
           <td style="color:var(--green); font-weight:700;">{% if pr.approved_amount %}{{ "{:,.2f}".format(pr.approved_amount | float) }}{% else %}—{% endif %}</td>
           <td><span class="badge badge-{{ pr.status_color }}">{{ pr.status | title }}</span></td>
@@ -430,7 +430,7 @@ function applyFilter() {
         <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'">
           <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
           <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b") }}</td>
-          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.description }}</td>
+          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].description if pr.items else "—" }}</td>
           <td>{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
           <td style="font-weight:700; color:var(--green);">
             {% if pr.approved_amount %}{{ "{:,.2f}".format(pr.approved_amount | float) }}{% else %}—{% endif %}

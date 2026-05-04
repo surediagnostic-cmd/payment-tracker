@@ -41,15 +41,6 @@
         <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>Rejected</option>
       </select>
     </div>
-    <div>
-      <label class="label">Category</label>
-      <select name="category_id" class="inp" style="width:180px;">
-        <option value="">All categories</option>
-        {% for c in categories %}
-        <option value="{{ c.id }}" {% if filters.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
     <button type="submit" class="btn-primary" style="padding:10px 20px;">Filter</button>
     <a href="{{ url_for('requests.list_requests') }}" class="btn-outline" style="padding:10px 16px;">Clear</a>
   </form>
@@ -77,8 +68,8 @@
         <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
         <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b %Y") }}</td>
         {% if current_user.is_mds %}<td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>{% endif %}
-        <td style="color:var(--muted); font-size:12px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.category.name }}</td>
-        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.description }}</td>
+        <td style="color:var(--muted); font-size:12px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].category.name if pr.items else "—" }}</td>
+        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ pr.items[0].description if pr.items else "—" }}{% if pr.items|length > 1 %} <span style="color:var(--dim); font-size:11px;">(+{{ pr.items|length - 1 }})</span>{% endif %}</td>
         <td>{{ "{:,.2f}".format(pr.requested_amount | float) }}</td>
         <td style="color:var(--green); font-weight:700;">
           {% if pr.approved_amount %}{{ "{:,.2f}".format(pr.approved_amount | float) }}{% else %}—{% endif %}
