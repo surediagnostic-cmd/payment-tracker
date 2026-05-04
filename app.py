@@ -99,6 +99,7 @@ def _seed_defaults():
         print("Default MDS account created: admin@surediagnostics.com / Admin@1234")
 
 
+app = create_app()
+
 if __name__ == "__main__":
-    app = create_app()
     app.run(debug=True)
