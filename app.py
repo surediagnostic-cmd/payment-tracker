@@ -23,9 +23,19 @@ def create_app():
             "SQLALCHEMY_DATABASE_URI"
         ].replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    # NullPool: no connection reuse — safest option for Supabase/PgBouncer
-    # Each request gets a fresh connection; eliminates all stale-conn 500s
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
+    # NullPool + PgBouncer-safe options for Supabase Session Pooler on Railway.
+    # Railway is IPv4-only; direct Supabase port 5432 resolves to IPv6 and fails.
+    # Session Pooler (pooler.supabase.com) uses IPv4 and works fine on Railway.
+    # prepared_statement_cache_size=0 disables named prepared statements which
+    # PgBouncer does not support in session-pooling mode.
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "poolclass": NullPool,
+        "connect_args": {
+            "sslmode": "require",
+            "options": "-c statement_timeout=30000",
+        },
+        "execution_options": {"prepared_statement_cache_size": 0},
+    }
 
     app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", 587))
