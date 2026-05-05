@@ -105,4 +105,9 @@ def review(req_id):
             flash(f"An error occurred: {str(e)}", "error")
             return redirect(url_for("approvals.review", req_id=req_id))
 
-    return render_template("review_request.html", pr=pr)
+    try:
+        return render_template("review_request.html", pr=pr)
+    except Exception as tpl_err:
+        print(f"[review render error] req {req_id}: {tpl_err}", flush=True)
+        flash(f"Could not load review page: {tpl_err}", "error")
+        return redirect(url_for("requests.dashboard"))
