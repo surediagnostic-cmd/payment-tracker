@@ -379,18 +379,6 @@ def mark_uploaded(req_id):
         flash("Only approved requests can be marked as uploaded.", "error")
         return redirect(url_for("requests.view_request", req_id=req_id))
 
-    # Optional receipt file upload
-    file = request.files.get("receipt")
-    if file and file.filename:
-        import os, uuid
-        from werkzeug.utils import secure_filename
-        upload_dir = os.path.join(current_app.root_path, "static", "uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        ext = os.path.splitext(secure_filename(file.filename))[1].lower()
-        filename = f"{pr.reference}_{uuid.uuid4().hex[:8]}{ext}"
-        file.save(os.path.join(upload_dir, filename))
-        pr.receipt_filename = filename
-
     pr.upload_status = "uploaded"
     db.session.commit()
     flash(f"{pr.reference} marked as uploaded.", "success")
@@ -400,88 +388,247 @@ def mark_uploaded(req_id):
 @requests_bp.route("/requests/template")
 @login_required
 def download_template():
-    """Download a blank Excel payment request template."""
+    """Download a blank Excel payment request template (one row = one request)."""
     import io
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from flask import send_file
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Payment Request"
+    # Fetch live category/branch names for the Instructions sheet
+    cats     = [c.name for c in Category.query.filter_by(is_active=True).order_by(Category.name).all()]
+    branches = [b.name for b in Branch.query.filter_by(is_active=True).order_by(Branch.name).all()]
 
-    orange = "F5821F"
-    navy   = "0B1E3D"
-    lt     = "E8EDF5"
-    grey   = "F2F4F7"
+    wb  = Workbook()
+    ws  = wb.active
+    ws.title = "Payment Requests"
+    navy, lt, grey = "0B1E3D", "E8EDF5", "F2F4F7"
 
-    # ── Header row ──────────────────────────────────────────────────────────
-    headers = [
-        "Date (YYYY-MM-DD)", "Branch", "Description", "Category",
-        "Quantity", "Rate (₦)", "Amount (₦)",
-        "Beneficiary Name", "Account Number", "Bank", "Bank Code",
-    ]
-    col_widths = [18, 14, 28, 22, 10, 14, 14, 24, 18, 18, 12]
+    headers    = ["Date (YYYY-MM-DD)", "Branch", "Beneficiary Name",
+                  "Account Number", "Bank", "Bank Code (opt)",
+                  "Description", "Category", "Quantity", "Rate (₦)", "Amount (₦)"]
+    col_widths = [18, 14, 24, 16, 18, 14, 32, 24, 10, 13, 13]
+
+    thin = Side(style="thin", color="C5CDD8")
+    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     for i, (h, w) in enumerate(zip(headers, col_widths), 1):
         cell = ws.cell(row=1, column=i, value=h)
-        cell.font      = Font(bold=True, color=lt, name="Calibri", size=11)
+        cell.font      = Font(bold=True, color=lt, name="Calibri", size=10)
         cell.fill      = PatternFill("solid", fgColor=navy)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border    = bdr
         ws.column_dimensions[cell.column_letter].width = w
-    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[1].height = 28
 
-    # ── Sample row ───────────────────────────────────────────────────────────
-    sample = [
-        "2026-05-01", "Ijofi", "Lab reagents – CBC batch",
-        "Lab Supplies / Reagents", 2, 15000, "=F2*E2",
-        "Sigma-Aldrich NG", "0123456789", "Zenith Bank", "057",
-    ]
+    # Sample row (row 2) — shown in italic grey so users know to replace it
+    sample = ["2026-05-01", branches[0] if branches else "Ijofi",
+              "Vendor Name", "0123456789", "Zenith Bank", "057",
+              "Example: Lab reagents batch", cats[0] if cats else "Lab Supplies / Reagents",
+              1, 10000, "=J2*I2"]
     for i, v in enumerate(sample, 1):
         cell = ws.cell(row=2, column=i, value=v)
         cell.fill      = PatternFill("solid", fgColor=grey)
+        cell.font      = Font(name="Calibri", size=10, italic=True, color="888888")
         cell.alignment = Alignment(horizontal="center")
-        cell.font      = Font(name="Calibri", size=10, italic=True, color="555555")
+        cell.border    = bdr
 
-    # ── Blank data rows ───────────────────────────────────────────────────
-    for r in range(3, 22):
+    # Empty data rows 3–51
+    for r in range(3, 52):
         for c in range(1, len(headers) + 1):
-            cell = ws.cell(row=r, column=c, value="")
-            thin = Side(style="thin", color="D0D5DD")
-            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            cell = ws.cell(row=r, column=c, value=None)
+            cell.border    = bdr
             cell.alignment = Alignment(horizontal="center")
+            cell.font      = Font(name="Calibri", size=10)
+        # Auto-formula for Amount column (col 11)
+        ws.cell(row=r, column=11, value=f"=J{r}*I{r}")
 
-    # ── Instructions sheet ────────────────────────────────────────────────
+    ws.freeze_panes = "A2"
+
+    # ── Instructions sheet ───────────────────────────────────────────────
     wi = wb.create_sheet("Instructions")
-    notes = [
-        ("Sure Diagnostics — Payment Request Template", True, 14),
-        ("", False, 11),
-        ("HOW TO USE THIS TEMPLATE", True, 11),
-        ("1. Fill in one row per line item (you can have multiple items per payment).", False, 10),
-        ("2. Date must be in YYYY-MM-DD format (e.g. 2026-05-04).", False, 10),
-        ("3. Branch: Ijofi | OAUTH | ILASA | Palm Avenue | Ikeja", False, 10),
-        ("4. Amount = Quantity × Rate (formula auto-fills if you copy row 2).", False, 10),
-        ("5. Use the web app to submit — this template is for reference only.", False, 10),
+    lines = [
+        ("Sure Diagnostics — Bulk Payment Request Template", True, 13),
         ("", False, 10),
-        ("CATEGORIES", True, 11),
-        ("Lab Supplies / Reagents  |  Doctor's Payment  |  Staff Salary / Bonus", False, 10),
-        ("Equipment / Maintenance  |  Electricity / Utilities  |  Stationery / Office", False, 10),
-        ("Cleaning / Sanitation  |  Imprest / Float  |  X-Ray / Imaging  |  Other", False, 10),
+        ("HOW TO USE", True, 11),
+        ("1. Each row is ONE complete payment request (with one line item).", False, 10),
+        ("2. Delete the grey sample row (row 2) before uploading.", False, 10),
+        ("3. Date format must be YYYY-MM-DD   e.g. 2026-05-04", False, 10),
+        ("4. Amount auto-calculates (Quantity × Rate). You can leave it.", False, 10),
+        ("5. Save as .xlsx then upload via 'Bulk Upload from Template'.", False, 10),
+        ("", False, 10),
+        ("VALID BRANCHES", True, 11),
+        ("  " + "  |  ".join(branches), False, 10),
+        ("", False, 10),
+        ("VALID CATEGORIES (copy exactly)", True, 11),
     ]
-    for row, (text, bold, size) in enumerate(notes, 1):
+    for cat in cats:
+        lines.append(("  " + cat, False, 10))
+
+    for row, (text, bold, size) in enumerate(lines, 1):
         cell = wi.cell(row=row, column=1, value=text)
-        cell.font = Font(bold=bold, size=size, name="Calibri")
-    wi.column_dimensions["A"].width = 80
+        cell.font = Font(bold=bold, size=size, name="Calibri",
+                         color="1A3D7C" if bold else "333333")
+    wi.column_dimensions["A"].width = 70
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name="Sure_Diagnostics_Payment_Template.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    return send_file(output, as_attachment=True,
+                     download_name="Sure_Diagnostics_Payment_Template.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@requests_bp.route("/requests/bulk-upload", methods=["GET", "POST"])
+@login_required
+def bulk_upload():
+    """Import multiple payment requests from the filled-in Excel template."""
+    if current_user.is_mds:
+        flash("MDS account cannot submit payment requests.", "error")
+        return redirect(url_for("requests.dashboard"))
+
+    user_branches    = current_user.branches
+    user_branch_ids  = {b.id for b in user_branches}
+
+    if request.method == "POST":
+        file = request.files.get("excel_file")
+        if not file or not file.filename.lower().endswith((".xlsx", ".xls")):
+            flash("Please upload a valid Excel file (.xlsx).", "error")
+            return redirect(url_for("requests.bulk_upload"))
+
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(file, data_only=True)
+            ws = wb.active
+
+            all_cats     = {c.name.lower().strip(): c
+                            for c in Category.query.filter_by(is_active=True).all()}
+            all_branches = {b.name.lower().strip(): b
+                            for b in Branch.query.filter_by(is_active=True).all()}
+
+            created, skipped, errors = 0, 0, []
+
+            for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+                # Skip fully empty rows
+                if not any(cell for cell in row if cell is not None):
+                    skipped += 1
+                    continue
+                # Skip if fewer columns than expected
+                if len(row) < 10:
+                    errors.append(f"Row {row_num}: too few columns, skipped.")
+                    continue
+
+                date_val, branch_raw, bene_name, bene_acct, bene_bank, \
+                    bank_code, description, cat_raw, qty_raw, rate_raw = \
+                    (row[i] for i in range(10))
+
+                # Skip the sample/example row
+                if str(description or "").lower().startswith("example:"):
+                    skipped += 1
+                    continue
+
+                # ── Validate required fields ──────────────────────────────
+                missing = [f for f, v in [
+                    ("Date", date_val), ("Branch", branch_raw),
+                    ("Beneficiary Name", bene_name), ("Account Number", bene_acct),
+                    ("Bank", bene_bank), ("Description", description),
+                    ("Category", cat_raw), ("Quantity", qty_raw), ("Rate", rate_raw),
+                ] if not v]
+                if missing:
+                    errors.append(f"Row {row_num}: missing {', '.join(missing)}.")
+                    continue
+
+                # ── Parse date ────────────────────────────────────────────
+                try:
+                    from datetime import date as dt_date
+                    if isinstance(date_val, dt_date):
+                        req_date = date_val
+                    else:
+                        req_date = datetime.strptime(str(date_val).strip(), "%Y-%m-%d").date()
+                except ValueError:
+                    errors.append(f"Row {row_num}: invalid date '{date_val}' — use YYYY-MM-DD.")
+                    continue
+
+                # ── Lookup branch ─────────────────────────────────────────
+                branch = all_branches.get(str(branch_raw).lower().strip())
+                if not branch:
+                    errors.append(f"Row {row_num}: unknown branch '{branch_raw}'.")
+                    continue
+                if branch.id not in user_branch_ids:
+                    errors.append(f"Row {row_num}: branch '{branch.name}' not assigned to you.")
+                    continue
+
+                # ── Lookup category ───────────────────────────────────────
+                cat_key = str(cat_raw).lower().strip()
+                cat = all_cats.get(cat_key)
+                if not cat:  # fuzzy: first category whose name contains the key
+                    cat = next((c for c in all_cats.values()
+                                if cat_key in c.name.lower()), None)
+                if not cat:
+                    errors.append(f"Row {row_num}: unknown category '{cat_raw}'.")
+                    continue
+
+                # ── Parse numbers ─────────────────────────────────────────
+                try:
+                    qty  = int(float(qty_raw))
+                    rate = Decimal(str(float(rate_raw)))
+                    if qty <= 0 or rate <= 0:
+                        raise ValueError("must be positive")
+                    amount = qty * rate
+                except (ValueError, TypeError) as num_err:
+                    errors.append(f"Row {row_num}: invalid qty/rate — {num_err}.")
+                    continue
+
+                # ── Create request + item ─────────────────────────────────
+                try:
+                    ref = PaymentRequest.generate_reference(branch.id)
+                    pr  = PaymentRequest(
+                        reference         = ref,
+                        date              = req_date,
+                        branch_id         = branch.id,
+                        beneficiary_name  = str(bene_name).strip(),
+                        beneficiary_account = str(bene_acct).strip(),
+                        beneficiary_bank  = str(bene_bank).strip(),
+                        bank_code         = str(bank_code).strip() if bank_code else "",
+                        requested_amount  = amount,
+                        submitted_by      = current_user.id,
+                    )
+                    db.session.add(pr)
+                    db.session.flush()
+                    db.session.add(PaymentRequestItem(
+                        request_id  = pr.id,
+                        description = str(description).strip(),
+                        category_id = cat.id,
+                        quantity    = qty,
+                        rate        = rate,
+                        amount      = amount,
+                    ))
+                    created += 1
+                except Exception as row_err:
+                    db.session.rollback()
+                    errors.append(f"Row {row_num}: {row_err}.")
+                    continue
+
+            if created:
+                db.session.commit()
+                flash(f"{created} payment request(s) submitted successfully.", "success")
+            else:
+                db.session.rollback()
+                flash("No valid rows found — nothing was created.", "warning")
+
+            for err in errors[:8]:
+                flash(err, "warning")
+
+            return redirect(url_for("requests.dashboard"))
+
+        except Exception as e:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            flash(f"Could not read the file: {str(e)}", "error")
+            return redirect(url_for("requests.bulk_upload"))
+
+    return render_template("bulk_upload.html", user_branches=user_branches)
 
 
 @requests_bp.route("/requests/<int:req_id>/delete", methods=["POST"])

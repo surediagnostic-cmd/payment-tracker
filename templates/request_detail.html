@@ -122,13 +122,7 @@
     <a href="{{ url_for('approvals.review', req_id=pr.id) }}" class="btn-primary">Review &amp; Approve</a>
     {% endif %}
     {% if pr.status == 'approved' and pr.upload_status == 'not_uploaded' %}
-    <form method="POST" action="{{ url_for('requests.mark_uploaded', req_id=pr.id) }}" enctype="multipart/form-data"
-          style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <label style="font-size:12px; color:var(--muted);">
-        Receipt (optional):
-        <input type="file" name="receipt" accept=".pdf,.jpg,.jpeg,.png"
-               style="margin-left:6px; font-size:12px; color:var(--text);"/>
-      </label>
+    <form method="POST" action="{{ url_for('requests.mark_uploaded', req_id=pr.id) }}">
       <button type="submit" class="btn-outline">Mark as Uploaded</button>
     </form>
     {% elif pr.upload_status == 'uploaded' and pr.receipt_filename %}
