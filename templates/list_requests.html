@@ -5,13 +5,31 @@
 <div style="margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
   <div>
     <div class="section-title">All Payments</div>
-    <div style="font-size:13px; color:var(--muted); margin-top:4px;">{{ requests | length }} record(s) found</div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;" id="record-count">{{ requests | length }} record(s) found</div>
   </div>
   <a href="{{ url_for('reports.export') }}{% if filters.branch_id %}?branch_id={{ filters.branch_id }}{% endif %}{% if filters.month %}&month={{ filters.month }}{% endif %}"
      class="btn-primary" style="font-size:13px;">
     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     Export Excel
   </a>
+</div>
+
+<!-- Live search -->
+<div style="position:relative; margin-bottom:14px;">
+  <svg style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;"
+       width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+  <input id="live-search" type="text" placeholder="Search by reference, name, description, bank, category…"
+         autocomplete="off"
+         style="width:100%; box-sizing:border-box; padding:11px 40px 11px 42px;
+                background:var(--bg2); border:1px solid var(--border); border-radius:10px;
+                color:var(--white); font-size:14px; outline:none; transition:border-color .15s;"
+         onfocus="this.style.borderColor='var(--orange)'"
+         onblur="this.style.borderColor='var(--border)'"/>
+  <button id="clear-search" onclick="document.getElementById('live-search').value='';filterTable();this.style.display='none';"
+          style="display:none; position:absolute; right:12px; top:50%; transform:translateY(-50%);
+                 background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; line-height:1; padding:0;">✕</button>
 </div>
 
 <!-- Filters -->
@@ -62,9 +80,20 @@
       <th>Upload</th>
       <th></th>
     </tr></thead>
-    <tbody>
+    <tbody id="payments-tbody">
       {% for pr in requests %}
-      <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'">
+      <tr style="cursor:pointer;" onclick="window.location='{{ url_for('requests.view_request', req_id=pr.id) }}'"
+          data-search="{{ [
+            pr.reference,
+            pr.date.strftime('%d %b %Y'),
+            pr.beneficiary_name,
+            pr.beneficiary_account,
+            pr.beneficiary_bank,
+            pr.branch.name,
+            pr.status,
+            pr.items[0].description if pr.items else '',
+            pr.items[0].category.name if pr.items else '',
+          ] | join(' ') | lower }}">
         <td><span style="font-family:monospace; color:var(--orange2); font-size:12px;">{{ pr.reference }}</span></td>
         <td style="color:var(--muted); white-space:nowrap;">{{ pr.date.strftime("%d %b %Y") }}</td>
         {% if current_user.is_mds %}<td><span class="badge badge-blue" style="font-size:10px;">{{ pr.branch.name }}</span></td>{% endif %}
@@ -101,10 +130,51 @@
         </td>
       </tr>
       {% endfor %}
+      <tr id="search-empty" style="display:none;">
+        <td colspan="10" style="text-align:center; padding:40px; color:var(--muted); font-size:14px;">
+          No records match your search.
+        </td>
+      </tr>
     </tbody>
   </table>
   {% else %}
   <div style="padding:48px; text-align:center; color:var(--muted); font-size:14px;">No payment requests match your filters.</div>
   {% endif %}
 </div>
+
+<script>
+const TOTAL = {{ requests | length }};
+
+function filterTable() {
+  const q = document.getElementById('live-search').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#payments-tbody tr');
+  const clearBtn = document.getElementById('clear-search');
+  let visible = 0;
+
+  rows.forEach(row => {
+    const text = row.getAttribute('data-search') || '';
+    const show = !q || text.includes(q);
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  // Update count label
+  const label = document.getElementById('record-count');
+  if (q) {
+    label.textContent = visible + ' of ' + TOTAL + ' record(s) match';
+    label.style.color = visible === 0 ? 'var(--red, #f87171)' : 'var(--muted)';
+  } else {
+    label.textContent = TOTAL + ' record(s) found';
+    label.style.color = 'var(--muted)';
+  }
+
+  // Toggle empty-state row
+  const empty = document.getElementById('search-empty');
+  if (empty) empty.style.display = (q && visible === 0) ? '' : 'none';
+
+  clearBtn.style.display = q ? 'block' : 'none';
+}
+
+document.getElementById('live-search').addEventListener('input', filterTable);
+</script>
 {% endblock %}
