@@ -1,7 +1,12 @@
 """Budget planning routes.
 
-Accountants can set/edit budgets for their own branches.
-MDS can set/edit budgets for any branch and view company-wide comparisons.
+Hierarchy (Option B — linked periods):
+  Monthly  → primary editable input (stored in DB, period_type='monthly')
+  Weekly   → derived: monthly ÷ 4, shown per week with real actuals (read-only)
+  Yearly   → derived: sum of all 12 months' budgets + full-year actuals (read-only)
+
+Only monthly rows are stored in the DB.
+Changing any monthly figure instantly flows into weekly and yearly views.
 """
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -17,19 +22,19 @@ from models import Branch, Category, Budget, PaymentRequest, PaymentRequestItem
 budget_bp = Blueprint("budget", __name__)
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _allowed_branch_ids():
+    if current_user.is_mds:
+        return [b.id for b in Branch.query.filter_by(is_active=True).all()]
+    return [b.id for b in current_user.branches]
+
 
 def _week_day_range(week: int):
-    """Return (start_day, end_day) for week 1-4 within a month.
-    Week 1 = days 1-7, Week 2 = days 8-14, Week 3 = days 15-21, Week 4 = days 22-31.
-    """
-    starts = {1: 1, 2: 8, 3: 15, 4: 22}
-    ends   = {1: 7, 2: 14, 3: 21, 4: 31}
-    return starts.get(week, 1), ends.get(week, 31)
+    return {1: (1, 7), 2: (8, 14), 3: (15, 21), 4: (22, 31)}.get(week, (1, 31))
 
 
-def _get_actuals(branch_id, category_id, period_type, year, month=None, week=None):
-    """Sum approved payment amounts for the given scope."""
+def _get_actuals(branch_id, category_id, year, month=None, week=None):
     q = (
         db.session.query(func.coalesce(func.sum(PaymentRequestItem.amount), 0))
         .join(PaymentRequest, PaymentRequestItem.request_id == PaymentRequest.id)
@@ -40,62 +45,121 @@ def _get_actuals(branch_id, category_id, period_type, year, month=None, week=Non
             extract("year", PaymentRequest.date) == year,
         )
     )
-    if period_type in ("monthly", "weekly") and month:
+    if month:
         q = q.filter(extract("month", PaymentRequest.date) == month)
-    if period_type == "weekly" and week:
-        start_day, end_day = _week_day_range(week)
+    if week and month:
+        s, e = _week_day_range(week)
         q = q.filter(
-            extract("day", PaymentRequest.date) >= start_day,
-            extract("day", PaymentRequest.date) <= end_day,
+            extract("day", PaymentRequest.date) >= s,
+            extract("day", PaymentRequest.date) <= e,
         )
     return Decimal(str(q.scalar() or 0))
 
 
-def _allowed_branch_ids():
-    """Return branch IDs this user may budget for."""
-    if current_user.is_mds:
-        return [b.id for b in Branch.query.filter_by(is_active=True).all()]
-    return [b.id for b in current_user.branches]
+def _monthly_budget(branch_id, category_id, year, month):
+    return Budget.query.filter_by(
+        branch_id=branch_id, category_id=category_id,
+        period_type="monthly", year=year, month=month, week=None
+    ).first()
 
 
-def _build_grid(branches, categories, period_type, year, month=None, week=None):
-    """Return a nested dict: grid[branch_id][category_id] = {budget, actual, pct, over}."""
-    # Fetch all budgets for this scope in one query
-    bq = Budget.query.filter_by(period_type=period_type, year=year)
-    if month is not None:
-        bq = bq.filter_by(month=month)
-    else:
-        bq = bq.filter(Budget.month.is_(None))
-    if week is not None:
-        bq = bq.filter_by(week=week)
-    else:
-        bq = bq.filter(Budget.week.is_(None))
+def _yearly_budget_amount(branch_id, category_id, year):
+    """Sum of all 12 monthly budgets — derived, never stored."""
+    total = db.session.query(
+        func.coalesce(func.sum(Budget.amount), 0)
+    ).filter_by(
+        branch_id=branch_id, category_id=category_id,
+        period_type="monthly", year=year
+    ).scalar()
+    return Decimal(str(total or 0))
 
-    budgets = {(b.branch_id, b.category_id): b for b in bq.all()}
 
+def _branch_totals(branches, categories, grid):
+    totals = {}
+    for br in branches:
+        b = sum(grid[br.id][c.id]["budgeted"] for c in categories)
+        a = sum(grid[br.id][c.id]["actual"]   for c in categories)
+        totals[br.id] = dict(
+            budgeted=b, actual=a, remaining=b - a,
+            pct=int(a / b * 100) if b > 0 else None,
+            over=a > b and b > 0,
+        )
+    return totals
+
+
+# ── grid builders ─────────────────────────────────────────────────────────────
+
+def _build_monthly_grid(branches, categories, year, month):
     grid = {}
     for br in branches:
         grid[br.id] = {}
         for cat in categories:
-            bobj = budgets.get((br.id, cat.id))
-            budgeted = Decimal(str(bobj.amount)) if bobj else Decimal("0")
-            actual   = _get_actuals(br.id, cat.id, period_type, year, month, week)
+            bobj      = _monthly_budget(br.id, cat.id, year, month)
+            budgeted  = Decimal(str(bobj.amount)) if bobj else Decimal("0")
+            actual    = _get_actuals(br.id, cat.id, year, month)
             remaining = budgeted - actual
             pct = int(actual / budgeted * 100) if budgeted > 0 else None
-            grid[br.id][cat.id] = {
-                "budget_id": bobj.id if bobj else None,
-                "budgeted":  budgeted,
-                "actual":    actual,
-                "remaining": remaining,
-                "pct":       pct,
-                "over":      actual > budgeted and budgeted > 0,
-                "warn":      pct is not None and pct >= 80,
-                "notes":     bobj.notes if bobj else "",
-            }
+            grid[br.id][cat.id] = dict(
+                budget_id=bobj.id if bobj else None,
+                budgeted=budgeted, actual=actual,
+                remaining=remaining, pct=pct,
+                over=actual > budgeted and budgeted > 0,
+                warn=pct is not None and pct >= 80,
+                notes=bobj.notes if bobj else "",
+            )
     return grid
 
 
-# ── main budget page ──────────────────────────────────────────────────────────
+def _build_yearly_grid(branches, categories, year):
+    grid = {}
+    for br in branches:
+        grid[br.id] = {}
+        for cat in categories:
+            budgeted  = _yearly_budget_amount(br.id, cat.id, year)
+            actual    = _get_actuals(br.id, cat.id, year)
+            remaining = budgeted - actual
+            pct = int(actual / budgeted * 100) if budgeted > 0 else None
+            # Per-month breakdown for display
+            months_data = []
+            for m in range(1, 13):
+                bobj = _monthly_budget(br.id, cat.id, year, m)
+                months_data.append({
+                    "label":    calendar.month_abbr[m],
+                    "budgeted": float(bobj.amount) if bobj else 0,
+                    "actual":   float(_get_actuals(br.id, cat.id, year, m)),
+                })
+            grid[br.id][cat.id] = dict(
+                budgeted=budgeted, actual=actual,
+                remaining=remaining, pct=pct,
+                over=actual > budgeted and budgeted > 0,
+                warn=pct is not None and pct >= 80,
+                months_data=months_data,
+            )
+    return grid
+
+
+def _build_weekly_grid(branches, categories, year, month, week):
+    grid = {}
+    for br in branches:
+        grid[br.id] = {}
+        for cat in categories:
+            bobj        = _monthly_budget(br.id, cat.id, year, month)
+            monthly_amt = Decimal(str(bobj.amount)) if bobj else Decimal("0")
+            budgeted    = (monthly_amt / 4).quantize(Decimal("0.01"))
+            actual      = _get_actuals(br.id, cat.id, year, month, week)
+            remaining   = budgeted - actual
+            pct = int(actual / budgeted * 100) if budgeted > 0 else None
+            grid[br.id][cat.id] = dict(
+                budgeted=budgeted, actual=actual,
+                remaining=remaining, pct=pct,
+                over=actual > budgeted and budgeted > 0,
+                warn=pct is not None and pct >= 80,
+                monthly_amt=monthly_amt,
+            )
+    return grid
+
+
+# ── main page ─────────────────────────────────────────────────────────────────
 
 @budget_bp.route("/budget")
 @login_required
@@ -103,84 +167,70 @@ def budget_home():
     now    = datetime.now(timezone.utc)
     period = request.args.get("period", "monthly")
     year   = int(request.args.get("year",  now.year))
-    month  = int(request.args.get("month", now.month)) if period in ("monthly", "weekly") else None
-    week   = int(request.args.get("week",  1))          if period == "weekly" else None
+    month  = int(request.args.get("month", now.month))
+    week   = int(request.args.get("week",  1))
+
+    if period not in ("monthly", "yearly", "weekly"):
+        period = "monthly"
 
     allowed_ids = _allowed_branch_ids()
-    branches    = Branch.query.filter(Branch.id.in_(allowed_ids), Branch.is_active == True).order_by(Branch.name).all()
+    branches    = Branch.query.filter(
+        Branch.id.in_(allowed_ids), Branch.is_active == True
+    ).order_by(Branch.name).all()
     categories  = Category.query.filter_by(is_active=True).order_by(Category.name).all()
 
-    grid = _build_grid(branches, categories, period, year, month, week)
+    if period == "yearly":
+        grid = _build_yearly_grid(branches, categories, year)
+        month_label = None
+    elif period == "weekly":
+        grid = _build_weekly_grid(branches, categories, year, month, week)
+        month_label = calendar.month_name[month]
+    else:
+        grid = _build_monthly_grid(branches, categories, year, month)
+        month_label = calendar.month_name[month]
 
-    # Summary totals per branch
-    branch_totals = {}
-    for br in branches:
-        b_total = sum(grid[br.id][c.id]["budgeted"] for c in categories)
-        a_total = sum(grid[br.id][c.id]["actual"]   for c in categories)
-        branch_totals[br.id] = {
-            "budgeted":  b_total,
-            "actual":    a_total,
-            "remaining": b_total - a_total,
-            "pct":       int(a_total / b_total * 100) if b_total > 0 else None,
-            "over":      a_total > b_total and b_total > 0,
-        }
-
-    # Company-wide totals
+    branch_totals  = _branch_totals(branches, categories, grid)
     total_budgeted = sum(v["budgeted"] for v in branch_totals.values())
     total_actual   = sum(v["actual"]   for v in branch_totals.values())
 
-    month_name = calendar.month_name[month] if month else ""
-    weeks_in_month = 4  # always 4 planning weeks
-
     return render_template(
         "budget.html",
-        branches=branches,
-        categories=categories,
-        grid=grid,
-        branch_totals=branch_totals,
-        total_budgeted=total_budgeted,
-        total_actual=total_actual,
-        period=period,
-        year=year,
-        month=month,
-        week=week,
-        month_name=month_name,
-        weeks_in_month=weeks_in_month,
+        branches=branches, categories=categories,
+        grid=grid, branch_totals=branch_totals,
+        total_budgeted=total_budgeted, total_actual=total_actual,
+        period=period, year=year, month=month, week=week,
+        month_label=month_label,
         year_range=range(now.year - 1, now.year + 3),
-        months=list(enumerate(calendar.month_name))[1:],  # [(1,'January'),...]
+        months=list(enumerate(calendar.month_name))[1:],
     )
 
 
-# ── save a single budget cell ─────────────────────────────────────────────────
+# ── save monthly budget cell (AJAX) ──────────────────────────────────────────
 
 @budget_bp.route("/budget/save", methods=["POST"])
 @login_required
 def save_budget():
-    """AJAX endpoint — saves one budget cell and returns updated totals."""
+    """Only monthly budgets are stored. Returns updated monthly stats
+    AND the recalculated yearly totals so the UI can update live."""
     try:
         branch_id   = int(request.form["branch_id"])
         category_id = int(request.form["category_id"])
-        period_type = request.form["period_type"]
         year        = int(request.form["year"])
-        month       = int(request.form["month"])  if request.form.get("month")  else None
-        week        = int(request.form["week"])   if request.form.get("week")   else None
+        month       = int(request.form["month"])
         notes       = request.form.get("notes", "").strip()
 
         raw = request.form.get("amount", "0").replace(",", "").strip()
         try:
-            amount = Decimal(raw)
+            amount = Decimal(raw) if raw else Decimal("0")
         except InvalidOperation:
             return jsonify(ok=False, error="Invalid amount"), 400
 
-        # Permission check
-        allowed = _allowed_branch_ids()
-        if branch_id not in allowed:
+        if branch_id not in _allowed_branch_ids():
             return jsonify(ok=False, error="Not authorised for this branch"), 403
 
-        # Upsert
         existing = Budget.query.filter_by(
             branch_id=branch_id, category_id=category_id,
-            period_type=period_type, year=year, month=month, week=week
+            period_type="monthly", year=year, month=month, week=None
         ).first()
 
         if existing:
@@ -188,26 +238,42 @@ def save_budget():
             existing.notes      = notes
             existing.updated_at = datetime.now(timezone.utc)
         else:
-            existing = Budget(
+            db.session.add(Budget(
                 branch_id=branch_id, category_id=category_id,
-                period_type=period_type, year=year, month=month, week=week,
+                period_type="monthly", year=year, month=month, week=None,
                 amount=amount, notes=notes, created_by=current_user.id
-            )
-            db.session.add(existing)
+            ))
 
         db.session.commit()
 
-        actual = _get_actuals(branch_id, category_id, period_type, year, month, week)
-        pct    = int(actual / amount * 100) if amount > 0 else None
+        # Monthly cell stats
+        actual    = _get_actuals(branch_id, category_id, year, month)
+        remaining = amount - actual
+        pct       = int(actual / amount * 100) if amount > 0 else None
+
+        # Yearly rollup — recalculated from all 12 months after this save
+        y_bud  = _yearly_budget_amount(branch_id, category_id, year)
+        y_act  = _get_actuals(branch_id, category_id, year)
+        y_pct  = int(y_act / y_bud * 100) if y_bud > 0 else None
+
+        # Weekly derived (month ÷ 4)
+        w_bud = float((amount / 4).quantize(Decimal("0.01")))
 
         return jsonify(
             ok=True,
-            budgeted=float(amount),
-            actual=float(actual),
-            remaining=float(amount - actual),
-            pct=pct,
+            # monthly
+            budgeted=float(amount), actual=float(actual),
+            remaining=float(remaining), pct=pct,
             over=actual > amount and amount > 0,
             warn=pct is not None and pct >= 80,
+            # yearly rollup (so yearly view can update without reload)
+            yearly_budgeted=float(y_bud),
+            yearly_actual=float(y_act),
+            yearly_remaining=float(y_bud - y_act),
+            yearly_pct=y_pct,
+            yearly_over=y_act > y_bud and y_bud > 0,
+            # weekly derived
+            weekly_budgeted=w_bud,
         )
 
     except Exception as e:
@@ -216,93 +282,63 @@ def save_budget():
         return jsonify(ok=False, error=str(e)), 500
 
 
-# ── copy last period's budgets ────────────────────────────────────────────────
+# ── copy last month ───────────────────────────────────────────────────────────
 
 @budget_bp.route("/budget/copy", methods=["POST"])
 @login_required
 def copy_last_period():
-    """Copy all budget entries from the previous period into the current one."""
-    period_type = request.form.get("period_type", "monthly")
-    year        = int(request.form.get("year",  datetime.now(timezone.utc).year))
-    month       = int(request.form.get("month", datetime.now(timezone.utc).month)) \
-                  if period_type in ("monthly", "weekly") else None
-    week        = int(request.form.get("week",  1)) if period_type == "weekly" else None
+    year  = int(request.form.get("year",  datetime.now(timezone.utc).year))
+    month = int(request.form.get("month", datetime.now(timezone.utc).month))
 
-    # Determine previous period
-    if period_type == "yearly":
-        prev_year, prev_month, prev_week = year - 1, None, None
-    elif period_type == "monthly":
-        if month == 1:
-            prev_year, prev_month, prev_week = year - 1, 12, None
-        else:
-            prev_year, prev_month, prev_week = year, month - 1, None
-    else:  # weekly
-        if week == 1:
-            if month == 1:
-                prev_year, prev_month, prev_week = year - 1, 12, 4
-            else:
-                prev_year, prev_month, prev_week = year, month - 1, 4
-        else:
-            prev_year, prev_month, prev_week = year, month, week - 1
+    prev_year  = year if month > 1 else year - 1
+    prev_month = month - 1 if month > 1 else 12
 
     allowed = _allowed_branch_ids()
-    src = Budget.query.filter_by(
-        period_type=period_type, year=prev_year, month=prev_month, week=prev_week
+    sources = Budget.query.filter_by(
+        period_type="monthly", year=prev_year, month=prev_month, week=None
     ).filter(Budget.branch_id.in_(allowed)).all()
 
     copied = 0
-    for s in src:
-        exists = Budget.query.filter_by(
+    for s in sources:
+        if not Budget.query.filter_by(
             branch_id=s.branch_id, category_id=s.category_id,
-            period_type=period_type, year=year, month=month, week=week
-        ).first()
-        if not exists:
+            period_type="monthly", year=year, month=month, week=None
+        ).first():
             db.session.add(Budget(
                 branch_id=s.branch_id, category_id=s.category_id,
-                period_type=period_type, year=year, month=month, week=week,
+                period_type="monthly", year=year, month=month, week=None,
                 amount=s.amount, notes=s.notes, created_by=current_user.id
             ))
             copied += 1
 
     db.session.commit()
-    flash(f"Copied {copied} budget entries from the previous period.", "success")
-
-    params = f"period={period_type}&year={year}"
-    if month: params += f"&month={month}"
-    if week:  params += f"&week={week}"
-    return redirect(url_for("budget.budget_home") + "?" + params)
+    flash(f"Copied {copied} entries from {calendar.month_name[prev_month]} {prev_year}.", "success")
+    return redirect(url_for("budget.budget_home") + f"?period=monthly&year={year}&month={month}")
 
 
-# ── JSON API for dashboard alerts ─────────────────────────────────────────────
+# ── dashboard alerts ──────────────────────────────────────────────────────────
 
 @budget_bp.route("/budget/alerts")
 @login_required
 def budget_alerts():
-    """Return branches/categories that are ≥ 80% of budget this month."""
-    now    = datetime.now(timezone.utc)
-    year   = now.year
-    month  = now.month
-    allowed_ids = _allowed_branch_ids()
-
+    now     = datetime.now(timezone.utc)
+    allowed = _allowed_branch_ids()
     budgets = Budget.query.filter_by(
-        period_type="monthly", year=year, month=month
-    ).filter(Budget.branch_id.in_(allowed_ids)).all()
+        period_type="monthly", year=now.year, month=now.month, week=None
+    ).filter(Budget.branch_id.in_(allowed)).all()
 
     alerts = []
     for b in budgets:
         if b.amount <= 0:
             continue
-        actual = _get_actuals(b.branch_id, b.category_id, "monthly", year, month)
+        actual = _get_actuals(b.branch_id, b.category_id, now.year, now.month)
         pct    = int(actual / b.amount * 100)
         if pct >= 80:
-            alerts.append({
-                "branch":   b.branch.name,
-                "category": b.category.name,
-                "pct":      pct,
-                "over":     actual > b.amount,
-                "budgeted": float(b.amount),
-                "actual":   float(actual),
-            })
+            alerts.append(dict(
+                branch=b.branch.name, category=b.category.name,
+                pct=pct, over=actual > b.amount,
+                budgeted=float(b.amount), actual=float(actual),
+            ))
 
     alerts.sort(key=lambda x: -x["pct"])
     return jsonify(alerts)
