@@ -7,6 +7,16 @@
 {% block content %}
 
 <!-- ══════════════════════════════════════
+     BUDGET ALERTS
+══════════════════════════════════════ -->
+<div id="budget-alerts" style="margin-bottom:20px; display:none;">
+  <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:8px;">
+    ⚠ Budget Alerts — This Month
+  </div>
+  <div id="budget-alerts-inner" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+</div>
+
+<!-- ══════════════════════════════════════
      FILTER BAR  (Year / Month / Branch dropdowns)
 ══════════════════════════════════════ -->
 {% set _parts = month_str.split('-') %}
@@ -585,6 +595,30 @@ function toggleBranchDetail(id) {
   detail.style.display = isOpen ? 'none' : 'table-row';
   chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
 }
+
+// Budget alerts
+fetch('{{ url_for("budget.budget_alerts") }}')
+  .then(r => r.json())
+  .then(alerts => {
+    if (!alerts.length) return;
+    const container = document.getElementById('budget-alerts');
+    const inner     = document.getElementById('budget-alerts-inner');
+    container.style.display = 'block';
+    alerts.forEach(a => {
+      const over  = a.over;
+      const color = over ? '#f87171' : 'var(--orange)';
+      const bg    = over ? 'rgba(248,113,113,.1)' : 'rgba(245,130,31,.1)';
+      const icon  = over ? '🔴' : '⚠️';
+      const chip  = document.createElement('a');
+      chip.href   = '{{ url_for("budget.budget_home") }}';
+      chip.style.cssText = `display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+        border-radius:8px;border:1px solid ${color};background:${bg};
+        font-size:12px;color:${color};font-weight:600;text-decoration:none;`;
+      chip.innerHTML = `${icon} ${a.branch} — ${a.category}: ${a.pct}%`;
+      inner.appendChild(chip);
+    });
+  })
+  .catch(() => {}); // fail silently — alerts are non-critical
 </script>
 
 {% endblock %}

@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Budget Planner{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+  <div>
+    <div class="section-title">Budget Planner</div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;">Plan spending, track actuals, spot overruns</div>
+  </div>
+  <!-- Copy last period -->
+  <form method="POST" action="{{ url_for('budget.copy_last_period') }}"
+        onsubmit="return confirm('Copy all budget figures from the previous {{ period }} into this one? Existing entries will not be overwritten.')">
+    <input type="hidden" name="period_type" value="{{ period }}">
+    <input type="hidden" name="year"  value="{{ year }}">
+    {% if month %}<input type="hidden" name="month" value="{{ month }}">{% endif %}
+    {% if week  %}<input type="hidden" name="week"  value="{{ week }}">{% endif %}
+    <button type="submit" class="btn-outline" style="font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      Copy Last {{ period | title }}
+    </button>
+  </form>
+</div>
+
+<!-- Period selector -->
+<div class="card" style="padding:16px; margin-bottom:20px;">
+  <form method="GET" action="{{ url_for('budget.budget_home') }}"
+        style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+    <div>
+      <label class="label">Period Type</label>
+      <select name="period" class="inp" style="width:130px;" onchange="this.form.submit()">
+        <option value="monthly" {% if period=='monthly' %}selected{% endif %}>Monthly</option>
+        <option value="yearly"  {% if period=='yearly'  %}selected{% endif %}>Yearly</option>
+        <option value="weekly"  {% if period=='weekly'  %}selected{% endif %}>Weekly</option>
+      </select>
+    </div>
+    <div>
+      <label class="label">Year</label>
+      <select name="year" class="inp" style="width:100px;">
+        {% for y in year_range %}
+        <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if period in ('monthly','weekly') %}
+    <div>
+      <label class="label">Month</label>
+      <select name="month" class="inp" style="width:130px;">
+        {% for num, name in months %}
+        <option value="{{ num }}" {% if num==month %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    {% if period == 'weekly' %}
+    <div>
+      <label class="label">Week</label>
+      <select name="week" class="inp" style="width:110px;">
+        <option value="1" {% if week==1 %}selected{% endif %}>Week 1 (1–7)</option>
+        <option value="2" {% if week==2 %}selected{% endif %}>Week 2 (8–14)</option>
+        <option value="3" {% if week==3 %}selected{% endif %}>Week 3 (15–21)</option>
+        <option value="4" {% if week==4 %}selected{% endif %}>Week 4 (22–end)</option>
+      </select>
+    </div>
+    {% endif %}
+    <button type="submit" class="btn-primary" style="padding:10px 20px;">Apply</button>
+  </form>
+</div>
+
+<!-- Period heading -->
+<div style="margin-bottom:16px; font-size:15px; font-weight:700; color:var(--white);">
+  {% if period == 'yearly' %}
+    {{ year }} — Full Year Budget
+  {% elif period == 'monthly' %}
+    {{ month_name }} {{ year }} — Monthly Budget
+  {% else %}
+    {{ month_name }} {{ year }} — Week {{ week }} Budget
+    <span style="font-size:12px; color:var(--muted); font-weight:400; margin-left:8px;">
+      (Days {% if week==1 %}1–7{% elif week==2 %}8–14{% elif week==3 %}15–21{% else %}22–end{% endif %})
+    </span>
+  {% endif %}
+</div>
+
+<!-- Company totals bar -->
+{% if total_budgeted > 0 %}
+{% set co_pct = (total_actual / total_budgeted * 100) | int %}
+<div class="card" style="padding:20px; margin-bottom:20px; border-color:{% if co_pct >= 100 %}var(--red,#f87171){% elif co_pct >= 80 %}var(--orange){% else %}var(--border){% endif %};">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700;">Company Total</div>
+    <div style="display:flex; gap:24px; font-size:13px;">
+      <span><span class="label" style="display:inline; margin:0;">Budgeted:</span> <strong style="color:var(--white);">₦{{ "{:,.0f}".format(total_budgeted | float) }}</strong></span>
+      <span><span class="label" style="display:inline; margin:0;">Spent:</span> <strong style="color:{% if co_pct>=100 %}var(--red,#f87171){% else %}var(--green){% endif %};">₦{{ "{:,.0f}".format(total_actual | float) }}</strong></span>
+      <span><span class="label" style="display:inline; margin:0;">Remaining:</span> <strong style="color:{% if total_actual > total_budgeted %}var(--red,#f87171){% else %}var(--muted){% endif %};">₦{{ "{:,.0f}".format((total_budgeted - total_actual) | float) }}</strong></span>
+    </div>
+  </div>
+  <div style="background:var(--bg2); border-radius:6px; height:10px; overflow:hidden;">
+    <div style="height:100%; border-radius:6px; transition:width .4s;
+                width:{{ [co_pct, 100] | min }}%;
+                background:{% if co_pct>=100 %}#f87171{% elif co_pct>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+  </div>
+  <div style="text-align:right; font-size:11px; color:var(--muted); margin-top:4px;">{{ co_pct }}% used</div>
+</div>
+{% endif %}
+
+{% if not branches %}
+<div class="card" style="padding:40px; text-align:center; color:var(--muted);">No branches assigned to your account.</div>
+{% elif not categories %}
+<div class="card" style="padding:40px; text-align:center; color:var(--muted);">No active categories. Add categories in Admin first.</div>
+{% else %}
+
+<!-- Per-branch sections -->
+{% for br in branches %}
+{% set bt = branch_totals[br.id] %}
+<div class="card" style="margin-bottom:24px; overflow:hidden;">
+  <!-- Branch header -->
+  <div style="padding:16px 20px; background:var(--bg2); border-bottom:1px solid var(--border);
+              display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="badge badge-blue">{{ br.name }}</span>
+      {% if bt.budgeted > 0 %}
+        {% if bt.over %}
+          <span style="font-size:11px; color:#f87171; font-weight:700;">⚠ OVER BUDGET</span>
+        {% elif bt.pct >= 80 %}
+          <span style="font-size:11px; color:var(--orange); font-weight:700;">⚠ {{ bt.pct }}% used</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:20px; font-size:12px; color:var(--muted);">
+      <span>Budgeted: <strong style="color:var(--white);">₦{{ "{:,.0f}".format(bt.budgeted | float) }}</strong></span>
+      <span>Spent: <strong style="color:{% if bt.over %}#f87171{% else %}var(--green){% endif %};">₦{{ "{:,.0f}".format(bt.actual | float) }}</strong></span>
+      <span>Left: <strong style="color:{% if bt.over %}#f87171{% else %}var(--muted){% endif %};">₦{{ "{:,.0f}".format(bt.remaining | float) }}</strong></span>
+    </div>
+  </div>
+
+  <!-- Branch progress bar -->
+  {% if bt.budgeted > 0 %}
+  <div style="padding:0 20px;">
+    <div style="background:var(--bg); height:6px; border-radius:0;">
+      {% set bpct = [bt.pct or 0, 100] | min %}
+      <div style="height:100%; transition:width .4s; width:{{ bpct }}%;
+                  background:{% if bt.over %}#f87171{% elif (bt.pct or 0)>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Category rows -->
+  <table style="margin:0;">
+    <thead>
+      <tr>
+        <th style="width:220px;">Category</th>
+        <th style="width:80px; text-align:center; font-size:10px; color:var(--muted);">Cost Type</th>
+        <th style="text-align:right;">Budget (₦)</th>
+        <th style="text-align:right;">Actual (₦)</th>
+        <th style="text-align:right;">Remaining (₦)</th>
+        <th style="width:110px;">Usage</th>
+        <th style="width:30px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cat in categories %}
+      {% set cell = grid[br.id][cat.id] %}
+      <tr id="row-{{ br.id }}-{{ cat.id }}"
+          style="{% if cell.over %}background:rgba(248,113,113,.06);{% elif cell.warn %}background:rgba(245,130,31,.04);{% endif %}">
+        <td style="color:var(--white); font-weight:500;">{{ cat.name }}</td>
+        <td style="text-align:center;">
+          {% if cat.cost_type == 'direct_cost' %}
+          <span class="badge badge-orange" style="font-size:9px;">Direct</span>
+          {% else %}
+          <span class="badge badge-gray" style="font-size:9px;">Overhead</span>
+          {% endif %}
+        </td>
+        <!-- Editable budget cell -->
+        <td style="text-align:right; padding:6px 12px;">
+          <input type="number" step="0.01" min="0"
+                 class="budget-input inp"
+                 data-branch="{{ br.id }}"
+                 data-category="{{ cat.id }}"
+                 data-period="{{ period }}"
+                 data-year="{{ year }}"
+                 data-month="{{ month or '' }}"
+                 data-week="{{ week or '' }}"
+                 value="{{ '{:.2f}'.format(cell.budgeted | float) if cell.budgeted > 0 else '' }}"
+                 placeholder="0.00"
+                 style="width:130px; text-align:right; padding:6px 10px; font-size:13px;"/>
+        </td>
+        <td style="text-align:right; color:{% if cell.over %}#f87171{% else %}var(--muted){% endif %}; font-weight:600;"
+            id="actual-{{ br.id }}-{{ cat.id }}">
+          {{ "{:,.2f}".format(cell.actual | float) }}
+        </td>
+        <td style="text-align:right; color:{% if cell.over %}#f87171{% elif cell.remaining > 0 %}var(--green){% else %}var(--muted){% endif %};"
+            id="remaining-{{ br.id }}-{{ cat.id }}">
+          {% if cell.budgeted > 0 %}{{ "{:,.2f}".format(cell.remaining | float) }}{% else %}—{% endif %}
+        </td>
+        <td id="bar-{{ br.id }}-{{ cat.id }}">
+          {% if cell.budgeted > 0 and cell.pct is not none %}
+          <div style="display:flex; align-items:center; gap:6px;">
+            <div style="flex:1; background:var(--bg2); border-radius:4px; height:8px; overflow:hidden;">
+              <div style="height:100%; border-radius:4px; width:{{ [cell.pct, 100] | min }}%;
+                          background:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+            </div>
+            <span style="font-size:11px; color:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--muted){% endif %}; min-width:32px; text-align:right;">{{ cell.pct }}%</span>
+          </div>
+          {% else %}
+          <span style="color:var(--dim); font-size:11px;">—</span>
+          {% endif %}
+        </td>
+        <td id="status-{{ br.id }}-{{ cat.id }}" style="text-align:center; font-size:12px; width:28px;"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+// Auto-save budget cells on blur/enter
+document.querySelectorAll('.budget-input').forEach(function(inp) {
+  let saveTimeout;
+
+  function save() {
+    clearTimeout(saveTimeout);
+    const brId  = inp.dataset.branch;
+    const catId = inp.dataset.category;
+    const statusEl = document.getElementById('status-' + brId + '-' + catId);
+    statusEl.textContent = '⏳';
+
+    const fd = new FormData();
+    fd.append('branch_id',   brId);
+    fd.append('category_id', catId);
+    fd.append('period_type', inp.dataset.period);
+    fd.append('year',        inp.dataset.year);
+    if (inp.dataset.month) fd.append('month', inp.dataset.month);
+    if (inp.dataset.week)  fd.append('week',  inp.dataset.week);
+    fd.append('amount', inp.value || '0');
+
+    fetch('{{ url_for("budget.save_budget") }}', {method:'POST', body:fd})
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { statusEl.textContent = '❌'; return; }
+        statusEl.textContent = '✓';
+        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+
+        // Update actual / remaining / bar
+        const fmt = v => v.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+        const actualEl     = document.getElementById('actual-'     + brId + '-' + catId);
+        const remainingEl  = document.getElementById('remaining-'  + brId + '-' + catId);
+        const barEl        = document.getElementById('bar-'        + brId + '-' + catId);
+
+        if (actualEl)    actualEl.textContent    = fmt(data.actual);
+        if (remainingEl) remainingEl.textContent = data.budgeted > 0 ? fmt(data.remaining) : '—';
+
+        // Recolour remaining
+        if (remainingEl) {
+          remainingEl.style.color = data.over ? '#f87171' : data.remaining > 0 ? 'var(--green)' : 'var(--muted)';
+        }
+
+        // Redraw progress bar
+        if (barEl && data.pct !== null) {
+          const pct   = Math.min(data.pct, 100);
+          const color = data.over ? '#f87171' : data.warn ? 'var(--orange)' : 'var(--green)';
+          barEl.innerHTML = `
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden;">
+                <div style="height:100%;border-radius:4px;width:${pct}%;background:${color};"></div>
+              </div>
+              <span style="font-size:11px;color:${color};min-width:32px;text-align:right;">${data.pct}%</span>
+            </div>`;
+        } else if (barEl) {
+          barEl.innerHTML = '<span style="color:var(--dim);font-size:11px;">—</span>';
+        }
+      })
+      .catch(() => { statusEl.textContent = '❌'; });
+  }
+
+  inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Tab')   { save(); }
+  });
+});
+</script>
+{% endblock %}

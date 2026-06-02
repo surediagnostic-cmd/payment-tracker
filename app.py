@@ -58,12 +58,14 @@ def create_app():
     from routes.approvals import approvals_bp
     from routes.reports import reports_bp
     from routes.admin import admin_bp
+    from routes.budget import budget_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(requests_bp)
     app.register_blueprint(approvals_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(budget_bp)
 
     @app.route("/")
     def root():
@@ -232,6 +234,33 @@ def _run_migrations():
             except Exception as e:
                 db.session.rollback()
                 print(f"[migration] receipt_filename: {e}")
+
+    # 5. Create budgets table if missing (db.create_all handles new deployments;
+    #    this migration covers existing deployments that already have other tables)
+    if 'budgets' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE budgets (
+                    id SERIAL PRIMARY KEY,
+                    branch_id INTEGER NOT NULL REFERENCES branches(id),
+                    category_id INTEGER NOT NULL REFERENCES categories(id),
+                    period_type VARCHAR(10) NOT NULL,
+                    year INTEGER NOT NULL,
+                    month INTEGER,
+                    week INTEGER,
+                    amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    created_by INTEGER NOT NULL REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_budget_period UNIQUE (branch_id, category_id, period_type, year, month, week)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created budgets table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] budgets table: {e}")
 
 
 def _seed_defaults():

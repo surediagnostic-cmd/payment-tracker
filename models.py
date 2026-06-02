@@ -104,3 +104,42 @@ class PaymentRequestItem(db.Model):
     rate = db.Column(db.Numeric(14, 2), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     category = db.relationship('Category')
+
+
+class Budget(db.Model):
+    """Planned spending per branch + category + period.
+
+    period_type | year | month | week
+    'monthly'   |  Y   |   Y   | null  → one calendar month
+    'yearly'    |  Y   | null  | null  → full calendar year
+    'weekly'    |  Y   |   Y   |  Y   → week 1-4 of a month
+                                         week 1 = days 1-7
+                                         week 2 = days 8-14
+                                         week 3 = days 15-21
+                                         week 4 = days 22-end
+    """
+    __tablename__ = "budgets"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id   = db.Column(db.Integer, db.ForeignKey("branches.id"),  nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=False)
+    period_type = db.Column(db.String(10), nullable=False)   # monthly | yearly | weekly
+    year        = db.Column(db.Integer, nullable=False)
+    month       = db.Column(db.Integer, nullable=True)       # 1-12
+    week        = db.Column(db.Integer, nullable=True)       # 1-4
+    amount      = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    notes       = db.Column(db.Text, nullable=True)
+    created_by  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                             onupdate=lambda: datetime.now(timezone.utc))
+
+    branch   = db.relationship("Branch")
+    category = db.relationship("Category")
+    creator  = db.relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'branch_id', 'category_id', 'period_type', 'year', 'month', 'week',
+            name='uq_budget_period'
+        ),
+    )
