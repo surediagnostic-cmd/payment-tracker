@@ -89,14 +89,64 @@ def _branch_totals(branches, categories, grid):
 
 # ── grid builders ─────────────────────────────────────────────────────────────
 
+def _bulk_budgets(branch_ids, category_ids, year):
+    """Fetch all monthly budgets for the given branches/categories/year in ONE query.
+    Returns dict keyed by (branch_id, category_id, month) → Budget object."""
+    rows = Budget.query.filter(
+        Budget.branch_id.in_(branch_ids),
+        Budget.category_id.in_(category_ids),
+        Budget.period_type == "monthly",
+        Budget.year == year,
+        Budget.week.is_(None),
+    ).all()
+    return {(b.branch_id, b.category_id, b.month): b for b in rows}
+
+
+def _bulk_actuals(branch_ids, category_ids, year, month=None):
+    """Fetch approved spending for the given scope in ONE query.
+    Returns dict keyed by (branch_id, category_id, month) → Decimal."""
+    q = (
+        db.session.query(
+            PaymentRequest.branch_id,
+            PaymentRequestItem.category_id,
+            extract("month", PaymentRequest.date).label("mo"),
+            func.sum(PaymentRequestItem.amount).label("total"),
+        )
+        .join(PaymentRequest, PaymentRequestItem.request_id == PaymentRequest.id)
+        .filter(
+            PaymentRequest.branch_id.in_(branch_ids),
+            PaymentRequestItem.category_id.in_(category_ids),
+            PaymentRequest.status == "approved",
+            extract("year", PaymentRequest.date) == year,
+        )
+        .group_by(
+            PaymentRequest.branch_id,
+            PaymentRequestItem.category_id,
+            extract("month", PaymentRequest.date),
+        )
+    )
+    if month:
+        q = q.filter(extract("month", PaymentRequest.date) == month)
+    return {
+        (int(r.branch_id), int(r.category_id), int(r.mo)): Decimal(str(r.total or 0))
+        for r in q.all()
+    }
+
+
 def _build_monthly_grid(branches, categories, year, month):
+    """2 bulk queries total regardless of number of branches/categories."""
+    bids = [br.id for br in branches]
+    cids = [cat.id for cat in categories]
+    bmap = _bulk_budgets(bids, cids, year)
+    amap = _bulk_actuals(bids, cids, year, month)
+
     grid = {}
     for br in branches:
         grid[br.id] = {}
         for cat in categories:
-            bobj      = _monthly_budget(br.id, cat.id, year, month)
+            bobj      = bmap.get((br.id, cat.id, month))
             budgeted  = Decimal(str(bobj.amount)) if bobj else Decimal("0")
-            actual    = _get_actuals(br.id, cat.id, year, month)
+            actual    = amap.get((br.id, cat.id, month), Decimal("0"))
             remaining = budgeted - actual
             pct = int(actual / budgeted * 100) if budgeted > 0 else None
             grid[br.id][cat.id] = dict(
@@ -111,23 +161,41 @@ def _build_monthly_grid(branches, categories, year, month):
 
 
 def _build_yearly_grid(branches, categories, year):
+    """2 bulk queries total — replaces the previous 650+ individual queries."""
+    bids = [br.id for br in branches]
+    cids = [cat.id for cat in categories]
+    bmap = _bulk_budgets(bids, cids, year)    # all 12 months in one shot
+    amap = _bulk_actuals(bids, cids, year)    # all actuals for the year
+
     grid = {}
     for br in branches:
         grid[br.id] = {}
         for cat in categories:
-            budgeted  = _yearly_budget_amount(br.id, cat.id, year)
-            actual    = _get_actuals(br.id, cat.id, year)
+            # Yearly budget = sum of all 12 stored monthly entries
+            budgeted = sum(
+                Decimal(str(bmap[(br.id, cat.id, m)].amount))
+                for m in range(1, 13)
+                if (br.id, cat.id, m) in bmap
+            )
+            # Yearly actual = sum of all monthly actuals
+            actual = sum(
+                amap.get((br.id, cat.id, m), Decimal("0"))
+                for m in range(1, 13)
+            )
             remaining = budgeted - actual
             pct = int(actual / budgeted * 100) if budgeted > 0 else None
-            # Per-month breakdown for display
+
+            # Month-by-month breakdown (no extra queries — all from bmap/amap)
             months_data = []
             for m in range(1, 13):
-                bobj = _monthly_budget(br.id, cat.id, year, m)
+                bobj    = bmap.get((br.id, cat.id, m))
+                m_actual = amap.get((br.id, cat.id, m), Decimal("0"))
                 months_data.append({
                     "label":    calendar.month_abbr[m],
                     "budgeted": float(bobj.amount) if bobj else 0,
-                    "actual":   float(_get_actuals(br.id, cat.id, year, m)),
+                    "actual":   float(m_actual),
                 })
+
             grid[br.id][cat.id] = dict(
                 budgeted=budgeted, actual=actual,
                 remaining=remaining, pct=pct,
@@ -139,14 +207,44 @@ def _build_yearly_grid(branches, categories, year):
 
 
 def _build_weekly_grid(branches, categories, year, month, week):
+    """2 bulk queries total."""
+    bids = [br.id for br in branches]
+    cids = [cat.id for cat in categories]
+    bmap = _bulk_budgets(bids, cids, year)
+
+    # Fetch weekly actuals in one query with day-range filter
+    s, e = _week_day_range(week)
+    amap_week = {}
+    rows = (
+        db.session.query(
+            PaymentRequest.branch_id,
+            PaymentRequestItem.category_id,
+            func.sum(PaymentRequestItem.amount).label("total"),
+        )
+        .join(PaymentRequest, PaymentRequestItem.request_id == PaymentRequest.id)
+        .filter(
+            PaymentRequest.branch_id.in_(bids),
+            PaymentRequestItem.category_id.in_(cids),
+            PaymentRequest.status == "approved",
+            extract("year",  PaymentRequest.date) == year,
+            extract("month", PaymentRequest.date) == month,
+            extract("day",   PaymentRequest.date) >= s,
+            extract("day",   PaymentRequest.date) <= e,
+        )
+        .group_by(PaymentRequest.branch_id, PaymentRequestItem.category_id)
+        .all()
+    )
+    for r in rows:
+        amap_week[(int(r.branch_id), int(r.category_id))] = Decimal(str(r.total or 0))
+
     grid = {}
     for br in branches:
         grid[br.id] = {}
         for cat in categories:
-            bobj        = _monthly_budget(br.id, cat.id, year, month)
+            bobj        = bmap.get((br.id, cat.id, month))
             monthly_amt = Decimal(str(bobj.amount)) if bobj else Decimal("0")
             budgeted    = (monthly_amt / 4).quantize(Decimal("0.01"))
-            actual      = _get_actuals(br.id, cat.id, year, month, week)
+            actual      = amap_week.get((br.id, cat.id), Decimal("0"))
             remaining   = budgeted - actual
             pct = int(actual / budgeted * 100) if budgeted > 0 else None
             grid[br.id][cat.id] = dict(
@@ -164,45 +262,53 @@ def _build_weekly_grid(branches, categories, year, month, week):
 @budget_bp.route("/budget")
 @login_required
 def budget_home():
-    now    = datetime.now(timezone.utc)
-    period = request.args.get("period", "monthly")
-    year   = int(request.args.get("year",  now.year))
-    month  = int(request.args.get("month", now.month))
-    week   = int(request.args.get("week",  1))
+    try:
+        now    = datetime.now(timezone.utc)
+        period = request.args.get("period", "monthly")
+        year   = int(request.args.get("year",  now.year))
+        month  = int(request.args.get("month", now.month))
+        week   = int(request.args.get("week",  1))
 
-    if period not in ("monthly", "yearly", "weekly"):
-        period = "monthly"
+        if period not in ("monthly", "yearly", "weekly"):
+            period = "monthly"
 
-    allowed_ids = _allowed_branch_ids()
-    branches    = Branch.query.filter(
-        Branch.id.in_(allowed_ids), Branch.is_active == True
-    ).order_by(Branch.name).all()
-    categories  = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+        allowed_ids = _allowed_branch_ids()
+        branches    = Branch.query.filter(
+            Branch.id.in_(allowed_ids), Branch.is_active == True
+        ).order_by(Branch.name).all()
+        categories  = Category.query.filter_by(is_active=True).order_by(Category.name).all()
 
-    if period == "yearly":
-        grid = _build_yearly_grid(branches, categories, year)
-        month_label = None
-    elif period == "weekly":
-        grid = _build_weekly_grid(branches, categories, year, month, week)
-        month_label = calendar.month_name[month]
-    else:
-        grid = _build_monthly_grid(branches, categories, year, month)
-        month_label = calendar.month_name[month]
+        if period == "yearly":
+            grid = _build_yearly_grid(branches, categories, year)
+            month_label = None
+        elif period == "weekly":
+            grid = _build_weekly_grid(branches, categories, year, month, week)
+            month_label = calendar.month_name[month]
+        else:
+            grid = _build_monthly_grid(branches, categories, year, month)
+            month_label = calendar.month_name[month]
 
-    branch_totals  = _branch_totals(branches, categories, grid)
-    total_budgeted = sum(v["budgeted"] for v in branch_totals.values())
-    total_actual   = sum(v["actual"]   for v in branch_totals.values())
+        branch_totals  = _branch_totals(branches, categories, grid)
+        total_budgeted = sum(v["budgeted"] for v in branch_totals.values())
+        total_actual   = sum(v["actual"]   for v in branch_totals.values())
 
-    return render_template(
-        "budget.html",
-        branches=branches, categories=categories,
-        grid=grid, branch_totals=branch_totals,
-        total_budgeted=total_budgeted, total_actual=total_actual,
-        period=period, year=year, month=month, week=week,
-        month_label=month_label,
-        year_range=range(now.year - 1, now.year + 3),
-        months=list(enumerate(calendar.month_name))[1:],
-    )
+        return render_template(
+            "budget.html",
+            branches=branches, categories=categories,
+            grid=grid, branch_totals=branch_totals,
+            total_budgeted=total_budgeted, total_actual=total_actual,
+            period=period, year=year, month=month, week=week,
+            month_label=month_label,
+            year_range=range(now.year - 1, now.year + 3),
+            months=list(enumerate(calendar.month_name))[1:],
+        )
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        print(f"[budget error] {e}", flush=True)
+        import traceback; traceback.print_exc()
+        flash(f"Budget page error: {str(e)}", "error")
+        return redirect(url_for("requests.dashboard"))
 
 
 # ── save monthly budget cell (AJAX) ──────────────────────────────────────────
