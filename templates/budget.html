@@ -110,16 +110,26 @@
 <!-- Per-branch sections -->
 {% for br in branches %}
 {% set bt = branch_totals[br.id] %}
-<div class="card" style="margin-bottom:24px; overflow:hidden;">
-  <!-- Branch header -->
-  <div style="padding:16px 20px; background:var(--bg2); border-bottom:1px solid var(--border);
-              display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-    <div style="display:flex; align-items:center; gap:12px;">
-      <span class="badge badge-blue">{{ br.name }}</span>
+<div class="card" style="margin-bottom:16px; overflow:hidden;">
+
+  <!-- ── Clickable branch header ── -->
+  <div id="header-{{ br.id }}" onclick="toggleBranch({{ br.id }})"
+       style="padding:16px 20px; background:var(--bg2); cursor:pointer; user-select:none;
+              display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+              border-bottom:1px solid var(--border); transition:background .15s;"
+       onmouseover="this.style.background='var(--card2)'"
+       onmouseout="this.style.background='var(--bg2)'">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <svg id="chevron-{{ br.id }}" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2.5" viewBox="0 0 24 24"
+           style="color:var(--muted); transition:transform .25s; flex-shrink:0; transform:rotate(-90deg);">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+      <span class="badge badge-blue" style="font-size:12px;">{{ br.name }}</span>
       {% if bt.budgeted > 0 %}
         {% if bt.over %}
           <span style="font-size:11px; color:#f87171; font-weight:700;">⚠ OVER BUDGET</span>
-        {% elif bt.pct >= 80 %}
+        {% elif bt.pct is not none and bt.pct >= 80 %}
           <span style="font-size:11px; color:var(--orange); font-weight:700;">⚠ {{ bt.pct }}% used</span>
         {% endif %}
       {% endif %}
@@ -131,88 +141,97 @@
     </div>
   </div>
 
-  <!-- Branch progress bar -->
-  {% if bt.budgeted > 0 %}
-  <div style="padding:0 20px;">
-    <div style="background:var(--bg); height:6px; border-radius:0;">
+  <!-- ── Collapsible body (hidden by default) ── -->
+  <div id="branch-body-{{ br.id }}" style="display:none;">
+
+    <!-- Progress bar -->
+    {% if bt.budgeted > 0 %}
+    <div style="background:var(--bg); height:5px;">
       {% set bpct = [bt.pct or 0, 100] | min %}
-      <div style="height:100%; transition:width .4s; width:{{ bpct }}%;
+      <div style="height:100%; width:{{ bpct }}%; transition:width .4s;
                   background:{% if bt.over %}#f87171{% elif (bt.pct or 0)>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
     </div>
-  </div>
-  {% endif %}
+    {% endif %}
 
-  <!-- Category rows -->
-  <table style="margin:0;">
-    <thead>
-      <tr>
-        <th style="width:220px;">Category</th>
-        <th style="width:80px; text-align:center; font-size:10px; color:var(--muted);">Cost Type</th>
-        <th style="text-align:right;">Budget (₦)</th>
-        <th style="text-align:right;">Actual (₦)</th>
-        <th style="text-align:right;">Remaining (₦)</th>
-        <th style="width:110px;">Usage</th>
-        <th style="width:30px;"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for cat in categories %}
-      {% set cell = grid[br.id][cat.id] %}
-      <tr id="row-{{ br.id }}-{{ cat.id }}"
-          style="{% if cell.over %}background:rgba(248,113,113,.06);{% elif cell.warn %}background:rgba(245,130,31,.04);{% endif %}">
-        <td style="color:var(--white); font-weight:500;">{{ cat.name }}</td>
-        <td style="text-align:center;">
-          {% if cat.cost_type == 'direct_cost' %}
-          <span class="badge badge-orange" style="font-size:9px;">Direct</span>
-          {% else %}
-          <span class="badge badge-gray" style="font-size:9px;">Overhead</span>
-          {% endif %}
-        </td>
-        <!-- Editable budget cell -->
-        <td style="text-align:right; padding:6px 12px;">
-          <input type="number" step="0.01" min="0"
-                 class="budget-input inp"
-                 data-branch="{{ br.id }}"
-                 data-category="{{ cat.id }}"
-                 data-period="{{ period }}"
-                 data-year="{{ year }}"
-                 data-month="{{ month or '' }}"
-                 data-week="{{ week or '' }}"
-                 value="{{ '{:.2f}'.format(cell.budgeted | float) if cell.budgeted > 0 else '' }}"
-                 placeholder="0.00"
-                 style="width:130px; text-align:right; padding:6px 10px; font-size:13px;"/>
-        </td>
-        <td style="text-align:right; color:{% if cell.over %}#f87171{% else %}var(--muted){% endif %}; font-weight:600;"
-            id="actual-{{ br.id }}-{{ cat.id }}">
-          {{ "{:,.2f}".format(cell.actual | float) }}
-        </td>
-        <td style="text-align:right; color:{% if cell.over %}#f87171{% elif cell.remaining > 0 %}var(--green){% else %}var(--muted){% endif %};"
-            id="remaining-{{ br.id }}-{{ cat.id }}">
-          {% if cell.budgeted > 0 %}{{ "{:,.2f}".format(cell.remaining | float) }}{% else %}—{% endif %}
-        </td>
-        <td id="bar-{{ br.id }}-{{ cat.id }}">
-          {% if cell.budgeted > 0 and cell.pct is not none %}
-          <div style="display:flex; align-items:center; gap:6px;">
-            <div style="flex:1; background:var(--bg2); border-radius:4px; height:8px; overflow:hidden;">
-              <div style="height:100%; border-radius:4px; width:{{ [cell.pct, 100] | min }}%;
-                          background:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+    <!-- Category table -->
+    <table style="margin:0;">
+      <thead>
+        <tr>
+          <th style="width:220px;">Category</th>
+          <th style="width:80px; text-align:center; font-size:10px; color:var(--muted);">Cost Type</th>
+          <th style="text-align:right;">Budget (₦)</th>
+          <th style="text-align:right;">Actual (₦)</th>
+          <th style="text-align:right;">Remaining (₦)</th>
+          <th style="width:110px;">Usage</th>
+          <th style="width:30px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cat in categories %}
+        {% set cell = grid[br.id][cat.id] %}
+        <tr id="row-{{ br.id }}-{{ cat.id }}"
+            style="{% if cell.over %}background:rgba(248,113,113,.06);{% elif cell.warn %}background:rgba(245,130,31,.04);{% endif %}">
+          <td style="color:var(--white); font-weight:500;">{{ cat.name }}</td>
+          <td style="text-align:center;">
+            {% if cat.cost_type == 'direct_cost' %}
+            <span class="badge badge-orange" style="font-size:9px;">Direct</span>
+            {% else %}
+            <span class="badge badge-gray" style="font-size:9px;">Overhead</span>
+            {% endif %}
+          </td>
+          <td style="text-align:right; padding:6px 12px;">
+            <input type="number" step="0.01" min="0"
+                   class="budget-input inp"
+                   data-branch="{{ br.id }}"
+                   data-category="{{ cat.id }}"
+                   data-period="{{ period }}"
+                   data-year="{{ year }}"
+                   data-month="{{ month or '' }}"
+                   data-week="{{ week or '' }}"
+                   value="{{ '{:.2f}'.format(cell.budgeted | float) if cell.budgeted > 0 else '' }}"
+                   placeholder="0.00"
+                   style="width:130px; text-align:right; padding:6px 10px; font-size:13px;"/>
+          </td>
+          <td style="text-align:right; color:{% if cell.over %}#f87171{% else %}var(--muted){% endif %}; font-weight:600;"
+              id="actual-{{ br.id }}-{{ cat.id }}">
+            {{ "{:,.2f}".format(cell.actual | float) }}
+          </td>
+          <td style="text-align:right; color:{% if cell.over %}#f87171{% elif cell.remaining > 0 %}var(--green){% else %}var(--muted){% endif %};"
+              id="remaining-{{ br.id }}-{{ cat.id }}">
+            {% if cell.budgeted > 0 %}{{ "{:,.2f}".format(cell.remaining | float) }}{% else %}—{% endif %}
+          </td>
+          <td id="bar-{{ br.id }}-{{ cat.id }}">
+            {% if cell.budgeted > 0 and cell.pct is not none %}
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="flex:1; background:var(--bg2); border-radius:4px; height:8px; overflow:hidden;">
+                <div style="height:100%; border-radius:4px; width:{{ [cell.pct, 100] | min }}%;
+                            background:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+              </div>
+              <span style="font-size:11px; color:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--muted){% endif %}; min-width:32px; text-align:right;">{{ cell.pct }}%</span>
             </div>
-            <span style="font-size:11px; color:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--muted){% endif %}; min-width:32px; text-align:right;">{{ cell.pct }}%</span>
-          </div>
-          {% else %}
-          <span style="color:var(--dim); font-size:11px;">—</span>
-          {% endif %}
-        </td>
-        <td id="status-{{ br.id }}-{{ cat.id }}" style="text-align:center; font-size:12px; width:28px;"></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+            {% else %}
+            <span style="color:var(--dim); font-size:11px;">—</span>
+            {% endif %}
+          </td>
+          <td id="status-{{ br.id }}-{{ cat.id }}" style="text-align:center; font-size:12px; width:28px;"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div><!-- /branch-body -->
 </div>
 {% endfor %}
 {% endif %}
 
 <script>
+function toggleBranch(id) {
+  const body    = document.getElementById('branch-body-' + id);
+  const chevron = document.getElementById('chevron-' + id);
+  const open    = body.style.display !== 'none';
+  body.style.display    = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
+}
+
 // Auto-save budget cells on blur/enter
 document.querySelectorAll('.budget-input').forEach(function(inp) {
   let saveTimeout;
