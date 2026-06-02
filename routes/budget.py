@@ -103,8 +103,12 @@ def _bulk_budgets(branch_ids, category_ids, year):
 
 
 def _bulk_actuals(branch_ids, category_ids, year, month=None):
-    """Fetch approved spending for the given scope in ONE query.
-    Returns dict keyed by (branch_id, category_id, month) → Decimal."""
+    """Fetch approved spending grouped by (branch, category, month).
+    Returns dict keyed by (branch_id, category_id, month_int) → Decimal.
+
+    Uses round() on the extracted month float so PostgreSQL double-precision
+    results like 5.9999… never land in the wrong month bucket.
+    """
     q = (
         db.session.query(
             PaymentRequest.branch_id,
@@ -128,7 +132,7 @@ def _bulk_actuals(branch_ids, category_ids, year, month=None):
     if month:
         q = q.filter(extract("month", PaymentRequest.date) == month)
     return {
-        (int(r.branch_id), int(r.category_id), int(r.mo)): Decimal(str(r.total or 0))
+        (int(r.branch_id), int(r.category_id), int(round(float(r.mo)))): Decimal(str(r.total or 0))
         for r in q.all()
     }
 
@@ -161,34 +165,71 @@ def _build_monthly_grid(branches, categories, year, month):
 
 
 def _build_yearly_grid(branches, categories, year):
-    """2 bulk queries total — replaces the previous 650+ individual queries."""
+    """4 fast queries — totals via direct DB GROUP BY, months_data from per-month maps."""
     bids = [br.id for br in branches]
     cids = [cat.id for cat in categories]
-    bmap = _bulk_budgets(bids, cids, year)    # all 12 months in one shot
-    amap = _bulk_actuals(bids, cids, year)    # all actuals for the year
+
+    # ── Query 1: yearly BUDGET totals per branch+category (DB does the SUM) ──
+    budget_total_rows = (
+        db.session.query(
+            Budget.branch_id,
+            Budget.category_id,
+            func.sum(Budget.amount).label("total"),
+        )
+        .filter(
+            Budget.branch_id.in_(bids),
+            Budget.category_id.in_(cids),
+            Budget.period_type == "monthly",
+            Budget.year == year,
+            Budget.month.isnot(None),
+            Budget.week.is_(None),
+        )
+        .group_by(Budget.branch_id, Budget.category_id)
+        .all()
+    )
+    budget_totals = {
+        (int(r.branch_id), int(r.category_id)): Decimal(str(r.total or 0))
+        for r in budget_total_rows
+    }
+
+    # ── Query 2: yearly ACTUAL totals per branch+category (DB does the SUM) ──
+    actual_total_rows = (
+        db.session.query(
+            PaymentRequest.branch_id,
+            PaymentRequestItem.category_id,
+            func.sum(PaymentRequestItem.amount).label("total"),
+        )
+        .join(PaymentRequest, PaymentRequestItem.request_id == PaymentRequest.id)
+        .filter(
+            PaymentRequest.branch_id.in_(bids),
+            PaymentRequestItem.category_id.in_(cids),
+            PaymentRequest.status == "approved",
+            extract("year", PaymentRequest.date) == year,
+        )
+        .group_by(PaymentRequest.branch_id, PaymentRequestItem.category_id)
+        .all()
+    )
+    actual_totals = {
+        (int(r.branch_id), int(r.category_id)): Decimal(str(r.total or 0))
+        for r in actual_total_rows
+    }
+
+    # ── Queries 3 & 4: per-month maps for the months_data breakdown sub-row ──
+    bmap = _bulk_budgets(bids, cids, year)
+    amap = _bulk_actuals(bids, cids, year)   # grouped by month with round()
 
     grid = {}
     for br in branches:
         grid[br.id] = {}
         for cat in categories:
-            # Yearly budget = sum of all 12 stored monthly entries
-            budgeted = sum(
-                Decimal(str(bmap[(br.id, cat.id, m)].amount))
-                for m in range(1, 13)
-                if (br.id, cat.id, m) in bmap
-            )
-            # Yearly actual = sum of all monthly actuals
-            actual = sum(
-                amap.get((br.id, cat.id, m), Decimal("0"))
-                for m in range(1, 13)
-            )
+            budgeted  = budget_totals.get((br.id, cat.id), Decimal("0"))
+            actual    = actual_totals.get((br.id, cat.id), Decimal("0"))
             remaining = budgeted - actual
             pct = int(actual / budgeted * 100) if budgeted > 0 else None
 
-            # Month-by-month breakdown (no extra queries — all from bmap/amap)
             months_data = []
             for m in range(1, 13):
-                bobj    = bmap.get((br.id, cat.id, m))
+                bobj     = bmap.get((br.id, cat.id, m))
                 m_actual = amap.get((br.id, cat.id, m), Decimal("0"))
                 months_data.append({
                     "label":    calendar.month_abbr[m],
