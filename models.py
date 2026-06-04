@@ -103,6 +103,7 @@ class PaymentRequestItem(db.Model):
     quantity = db.Column(db.Integer, nullable=False, default=1)
     rate = db.Column(db.Numeric(14, 2), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
+    notes = db.Column(db.String(500), nullable=True)
     category = db.relationship('Category')
 
 

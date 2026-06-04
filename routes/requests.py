@@ -285,6 +285,7 @@ def new_request():
             category_ids = request.form.getlist("category_ids[]")
             quantities   = request.form.getlist("quantities[]")
             rates        = request.form.getlist("rates[]")
+            notes_list   = request.form.getlist("notes[]")
 
             if not descriptions or not any(d.strip() for d in descriptions):
                 flash("At least one line item is required.", "error")
@@ -300,12 +301,14 @@ def new_request():
                 rate   = Decimal(rates[i].replace(",", ""))
                 amount = qty * rate
                 total += amount
+                note   = notes_list[i].strip() if i < len(notes_list) else ""
                 items_data.append({
                     "description": desc,
                     "category_id": int(category_ids[i]),
                     "quantity":    qty,
                     "rate":        rate,
                     "amount":      amount,
+                    "notes":       note or None,
                 })
 
             ref = PaymentRequest.generate_reference(branch_id)

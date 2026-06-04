@@ -235,7 +235,21 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] receipt_filename: {e}")
 
-    # 5. Create budgets table if missing (db.create_all handles new deployments;
+    # 5. Add notes column to payment_request_items if missing
+    if 'payment_request_items' in tables:
+        item_cols = {c['name'] for c in insp.get_columns('payment_request_items')}
+        if 'notes' not in item_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_request_items ADD COLUMN notes VARCHAR(500)"
+                ))
+                db.session.commit()
+                print("[migration] added notes column to payment_request_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] item notes: {e}")
+
+    # 6. Create budgets table if missing (db.create_all handles new deployments;
     #    this migration covers existing deployments that already have other tables)
     if 'budgets' not in tables:
         try:

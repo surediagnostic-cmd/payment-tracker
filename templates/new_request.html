@@ -45,34 +45,44 @@
 
       <div id="itemsContainer">
         <!-- Row template filled by JS; one default row rendered here -->
-        <div class="item-row" style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:14px;">
-          <div>
-            <label class="label" style="margin-bottom:4px;">Description *</label>
-            <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+        <div class="item-row" style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
+          <div style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:8px;">
+            <div>
+              <label class="label" style="margin-bottom:4px;">Description *</label>
+              <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+            </div>
+            <div>
+              <label class="label" style="margin-bottom:4px;">Category *</label>
+              <select name="category_ids[]" class="inp" required>
+                <option value="">— Select —</option>
+                {% for cat in categories %}
+                <option value="{{ cat.id }}">{{ cat.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label" style="margin-bottom:4px;">Qty *</label>
+              <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
+            </div>
+            <div>
+              <label class="label" style="margin-bottom:4px;">Rate (₦) *</label>
+              <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
+            </div>
+            <div>
+              <label class="label" style="margin-bottom:4px;">Amount (₦)</label>
+              <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
+            </div>
+            <div style="padding-bottom:2px;">
+              <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px; display:none;">✕</button>
+            </div>
           </div>
-          <div>
-            <label class="label" style="margin-bottom:4px;">Category *</label>
-            <select name="category_ids[]" class="inp" required>
-              <option value="">— Select —</option>
-              {% for cat in categories %}
-              <option value="{{ cat.id }}">{{ cat.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label class="label" style="margin-bottom:4px;">Qty *</label>
-            <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
-          </div>
-          <div>
-            <label class="label" style="margin-bottom:4px;">Rate (₦) *</label>
-            <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
-          </div>
-          <div>
-            <label class="label" style="margin-bottom:4px;">Amount (₦)</label>
-            <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
-          </div>
-          <div style="padding-bottom:2px;">
-            <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px; display:none;">✕</button>
+          <!-- Note field — full width, optional -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <input type="text" name="notes[]" class="inp" placeholder="Note for this item (optional)"
+                   maxlength="500"
+                   style="flex:1; padding:7px 12px; font-size:12px; color:var(--muted);
+                          background:var(--bg); border-color:var(--dim);"/>
           </div>
         </div>
       </div>
@@ -127,27 +137,36 @@ const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}"
 document.getElementById('dateField').value = new Date().toISOString().split('T')[0];
 
 function rowHtml() {
-  return `<div class="item-row" style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:14px;">
-    <div>
-      <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+  return `<div class="item-row" style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
+    <div style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:8px;">
+      <div>
+        <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
+      </div>
+      <div>
+        <select name="category_ids[]" class="inp" required>
+          <option value="">— Select —</option>
+          ${categoryOptions}
+        </select>
+      </div>
+      <div>
+        <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
+      </div>
+      <div>
+        <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
+      </div>
+      <div>
+        <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
+      </div>
+      <div style="padding-bottom:2px;">
+        <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px;">✕</button>
+      </div>
     </div>
-    <div>
-      <select name="category_ids[]" class="inp" required>
-        <option value="">— Select —</option>
-        ${categoryOptions}
-      </select>
-    </div>
-    <div>
-      <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
-    </div>
-    <div>
-      <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
-    </div>
-    <div>
-      <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
-    </div>
-    <div style="padding-bottom:2px;">
-      <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px;">✕</button>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <input type="text" name="notes[]" class="inp" placeholder="Note for this item (optional)"
+             maxlength="500"
+             style="flex:1; padding:7px 12px; font-size:12px; color:var(--muted);
+                    background:var(--bg); border-color:var(--dim);"/>
     </div>
   </div>`;
 }
