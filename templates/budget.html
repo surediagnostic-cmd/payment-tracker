@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+{% block title %}Budget Planner{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+  <div>
+    <div class="section-title">Budget Planner</div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;">
+      {% if period == 'monthly' %}
+        Enter monthly budgets below — weekly and yearly totals update automatically
+      {% elif period == 'yearly' %}
+        <span style="color:var(--orange);">Read-only</span> — auto-calculated from your monthly budgets
+      {% else %}
+        <span style="color:var(--orange);">Read-only</span> — each week = monthly budget ÷ 4
+      {% endif %}
+    </div>
+  </div>
+  {% if period == 'monthly' %}
+  <form method="POST" action="{{ url_for('budget.copy_last_period') }}"
+        onsubmit="return confirm('Copy all budget figures from the previous month? Existing entries will not be overwritten.')">
+    <input type="hidden" name="year"  value="{{ year }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button type="submit" class="btn-outline" style="font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      Copy Last Month
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+<!-- Period tabs + selectors -->
+<div class="card" style="padding:16px; margin-bottom:20px;">
+  <div style="display:flex; gap:0; margin-bottom:14px; background:var(--bg); border-radius:8px; padding:3px; width:fit-content;">
+    {% for p, label in [('monthly','Monthly'),('weekly','Weekly'),('yearly','Yearly')] %}
+    <a href="{{ url_for('budget.budget_home', period=p, year=year, month=month, week=week) }}"
+       style="padding:7px 20px; border-radius:6px; font-size:13px; font-weight:600; text-decoration:none; transition:all .15s;
+              {% if period==p %}background:var(--orange); color:#fff;{% else %}color:var(--muted);{% endif %}">
+      {{ label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <form method="GET" action="{{ url_for('budget.budget_home') }}"
+        style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <input type="hidden" name="period" value="{{ period }}">
+    <div>
+      <label class="label">Year</label>
+      <select name="year" class="inp" style="width:100px;" onchange="this.form.submit()">
+        {% for y in year_range %}
+        <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if period in ('monthly','weekly') %}
+    <div>
+      <label class="label">Month</label>
+      <select name="month" class="inp" style="width:130px;" onchange="this.form.submit()">
+        {% for num, name in months %}
+        <option value="{{ num }}" {% if num==month %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    {% if period == 'weekly' %}
+    <div>
+      <label class="label">Week</label>
+      <select name="week" class="inp" style="width:120px;" onchange="this.form.submit()">
+        <option value="1" {% if week==1 %}selected{% endif %}>Week 1 (1–7)</option>
+        <option value="2" {% if week==2 %}selected{% endif %}>Week 2 (8–14)</option>
+        <option value="3" {% if week==3 %}selected{% endif %}>Week 3 (15–21)</option>
+        <option value="4" {% if week==4 %}selected{% endif %}>Week 4 (22–end)</option>
+      </select>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+<!-- Heading + read-only notice -->
+<div style="margin-bottom:14px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+  <div style="font-size:15px; font-weight:700; color:var(--white);">
+    {% if period == 'yearly' %}
+      {{ year }} — Full Year
+    {% elif period == 'monthly' %}
+      {{ month_label }} {{ year }}
+    {% else %}
+      {{ month_label }} {{ year }} · Week {{ week }}
+      <span style="font-size:12px; color:var(--muted); font-weight:400;">(Days {% if week==1 %}1–7{% elif week==2 %}8–14{% elif week==3 %}15–21{% else %}22–end{% endif %})</span>
+    {% endif %}
+  </div>
+  {% if period != 'monthly' %}
+  <span style="font-size:12px; background:var(--orange-d); color:var(--orange); padding:4px 10px; border-radius:6px; border:1px solid rgba(245,130,31,.3);">
+    {% if period == 'yearly' %}Yearly = sum of all 12 monthly budgets{% else %}Weekly = monthly ÷ 4{% endif %}
+    · <a href="{{ url_for('budget.budget_home', period='monthly', year=year, month=month) }}"
+         style="color:var(--orange2); text-decoration:none; font-weight:700;">Edit monthly →</a>
+  </span>
+  {% endif %}
+</div>
+
+<!-- Company total bar -->
+{% if total_budgeted > 0 %}
+{% set co_pct = [(total_actual / total_budgeted * 100) | int, 100] | min %}
+{% set co_over = total_actual > total_budgeted %}
+<div class="card" style="padding:18px; margin-bottom:20px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700;">
+      Company Total — {% if period=='yearly' %}{{ year }}{% elif period=='monthly' %}{{ month_label }}{% else %}Week {{ week }}{% endif %}
+    </div>
+    <div style="display:flex; gap:20px; font-size:13px;">
+      <span><span class="label" style="display:inline;margin:0;">Budgeted</span> <strong style="color:var(--white);">₦{{ "{:,.0f}".format(total_budgeted|float) }}</strong></span>
+      <span><span class="label" style="display:inline;margin:0;">Spent</span> <strong style="color:{% if co_over %}#f87171{% else %}var(--green){% endif %};">₦{{ "{:,.0f}".format(total_actual|float) }}</strong></span>
+      <span><span class="label" style="display:inline;margin:0;">Remaining</span> <strong style="color:{% if co_over %}#f87171{% else %}var(--muted){% endif %};">₦{{ "{:,.0f}".format((total_budgeted-total_actual)|float) }}</strong></span>
+    </div>
+  </div>
+  <div style="background:var(--bg2); border-radius:6px; height:10px; overflow:hidden;">
+    <div style="height:100%; border-radius:6px; width:{{ co_pct }}%;
+                background:{% if co_over %}#f87171{% elif co_pct>=80 %}var(--orange){% else %}var(--green){% endif %}; transition:width .4s;"></div>
+  </div>
+  <div style="text-align:right; font-size:11px; color:var(--muted); margin-top:4px;">
+    {{ (total_actual / total_budgeted * 100)|int }}% used
+  </div>
+</div>
+{% endif %}
+
+{% if not branches %}
+<div class="card" style="padding:40px; text-align:center; color:var(--muted);">No branches assigned to your account.</div>
+{% elif not categories %}
+<div class="card" style="padding:40px; text-align:center; color:var(--muted);">No active categories. Add categories in Admin first.</div>
+{% else %}
+
+<!-- Branch sections -->
+{% for br in branches %}
+{% set bt = branch_totals[br.id] %}
+<div class="card" style="margin-bottom:14px; overflow:hidden;">
+
+  <!-- Clickable header -->
+  <div onclick="toggleBranch({{ br.id }})"
+       style="padding:14px 18px; background:var(--bg2); cursor:pointer; user-select:none;
+              display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+              border-bottom:1px solid var(--border); transition:background .15s;"
+       onmouseover="this.style.background='var(--card2)'"
+       onmouseout="this.style.background='var(--bg2)'">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <svg id="chevron-{{ br.id }}" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.5" viewBox="0 0 24 24"
+           style="color:var(--muted); transition:transform .25s; transform:rotate(-90deg);">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+      <span class="badge badge-blue">{{ br.name }}</span>
+      {% if bt.budgeted > 0 %}
+        {% if bt.over %}<span style="font-size:11px;color:#f87171;font-weight:700;">⚠ OVER BUDGET</span>
+        {% elif bt.pct is not none and bt.pct >= 80 %}<span style="font-size:11px;color:var(--orange);font-weight:700;">⚠ {{ bt.pct }}% used</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:18px; font-size:12px; color:var(--muted);">
+      <span>Budget <strong style="color:var(--white);">₦{{ "{:,.0f}".format(bt.budgeted|float) }}</strong></span>
+      <span>Spent <strong style="color:{% if bt.over %}#f87171{% else %}var(--green){% endif %};">₦{{ "{:,.0f}".format(bt.actual|float) }}</strong></span>
+      <span>Left <strong style="color:{% if bt.over %}#f87171{% else %}var(--muted){% endif %};">₦{{ "{:,.0f}".format(bt.remaining|float) }}</strong></span>
+    </div>
+  </div>
+
+  <!-- Collapsible body -->
+  <div id="branch-body-{{ br.id }}" style="display:none;">
+
+    {% if bt.budgeted > 0 %}
+    <div style="height:4px; background:var(--bg);">
+      <div style="height:100%; width:{{ [bt.pct or 0, 100]|min }}%; transition:width .4s;
+                  background:{% if bt.over %}#f87171{% elif (bt.pct or 0)>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+    </div>
+    {% endif %}
+
+    <table style="margin:0;">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th style="width:70px; text-align:center; font-size:10px;">Type</th>
+          <th style="text-align:right;">
+            {% if period=='monthly' %}Budget (₦) <span style="font-weight:400; color:var(--dim); font-size:10px;">— editable</span>
+            {% elif period=='weekly' %}Week Budget (₦) <span style="font-weight:400; color:var(--dim); font-size:10px;">= monthly ÷ 4</span>
+            {% else %}Year Budget (₦) <span style="font-weight:400; color:var(--dim); font-size:10px;">= sum of 12 months</span>
+            {% endif %}
+          </th>
+          <th style="text-align:right;">Actual (₦)</th>
+          <th style="text-align:right;">Remaining (₦)</th>
+          <th style="width:120px;">Usage</th>
+          {% if period=='monthly' %}<th style="width:28px;"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for cat in categories %}
+        {% set cell = grid[br.id][cat.id] %}
+        <tr style="{% if cell.over %}background:rgba(248,113,113,.06);{% elif cell.warn %}background:rgba(245,130,31,.04);{% endif %}">
+          <td style="color:var(--white); font-weight:500;">{{ cat.name }}</td>
+          <td style="text-align:center;">
+            {% if cat.cost_type == 'direct_cost' %}
+            <span class="badge badge-orange" style="font-size:9px;">Direct</span>
+            {% else %}
+            <span class="badge badge-gray" style="font-size:9px;">Overhead</span>
+            {% endif %}
+          </td>
+
+          <!-- Budget cell: editable for monthly, read-only for weekly/yearly -->
+          <td style="text-align:right; padding:6px 12px;">
+            {% if period == 'monthly' %}
+            <input type="number" step="0.01" min="0"
+                   class="budget-input inp"
+                   data-branch="{{ br.id }}"
+                   data-category="{{ cat.id }}"
+                   data-year="{{ year }}"
+                   data-month="{{ month }}"
+                   value="{{ '{:.2f}'.format(cell.budgeted|float) if cell.budgeted > 0 else '' }}"
+                   placeholder="0.00"
+                   style="width:130px; text-align:right; padding:6px 10px; font-size:13px;"/>
+            {% else %}
+            <span style="color:var(--muted); font-size:13px;" id="bud-{{ br.id }}-{{ cat.id }}">
+              {% if cell.budgeted > 0 %}{{ "{:,.2f}".format(cell.budgeted|float) }}{% else %}—{% endif %}
+            </span>
+            {% if period == 'weekly' and cell.monthly_amt > 0 %}
+            <div style="font-size:10px; color:var(--dim); margin-top:2px;">monthly: ₦{{ "{:,.0f}".format(cell.monthly_amt|float) }}</div>
+            {% endif %}
+            {% endif %}
+          </td>
+
+          <td style="text-align:right; color:{% if cell.over %}#f87171{% else %}var(--muted){% endif %}; font-weight:600;"
+              id="actual-{{ br.id }}-{{ cat.id }}">
+            {{ "{:,.2f}".format(cell.actual|float) }}
+          </td>
+
+          <td style="text-align:right; color:{% if cell.over %}#f87171{% elif cell.remaining > 0 %}var(--green){% else %}var(--muted){% endif %};"
+              id="remaining-{{ br.id }}-{{ cat.id }}">
+            {% if cell.budgeted > 0 %}{{ "{:,.2f}".format(cell.remaining|float) }}{% else %}—{% endif %}
+          </td>
+
+          <td id="bar-{{ br.id }}-{{ cat.id }}">
+            {% if cell.budgeted > 0 and cell.pct is not none %}
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="flex:1; background:var(--bg2); border-radius:4px; height:8px; overflow:hidden;">
+                <div style="height:100%; border-radius:4px; width:{{ [cell.pct,100]|min }}%;
+                            background:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--green){% endif %};"></div>
+              </div>
+              <span style="font-size:11px; min-width:32px; text-align:right;
+                           color:{% if cell.over %}#f87171{% elif cell.pct>=80 %}var(--orange){% else %}var(--muted){% endif %};">{{ cell.pct }}%</span>
+            </div>
+            {% else %}
+            <span style="color:var(--dim); font-size:11px;">—</span>
+            {% endif %}
+          </td>
+
+          {% if period == 'monthly' %}
+          <td id="status-{{ br.id }}-{{ cat.id }}" style="text-align:center; font-size:12px; width:28px;"></td>
+          {% endif %}
+        </tr>
+
+        <!-- Yearly: show per-month breakdown as a small sub-row -->
+        {% if period == 'yearly' and cell.months_data is defined %}
+        <tr id="yr-detail-{{ br.id }}-{{ cat.id }}" style="display:none; background:var(--bg);">
+          <td colspan="{% if period=='monthly' %}7{% else %}6{% endif %}" style="padding:10px 16px;">
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              {% for md in cell.months_data %}
+              <div style="text-align:center; min-width:52px;">
+                <div style="font-size:9px; color:var(--dim); margin-bottom:3px;">{{ md.label }}</div>
+                <div style="font-size:11px; color:{% if md.budgeted==0 %}var(--dim){% else %}var(--white){% endif %}; font-weight:600;">
+                  {% if md.budgeted > 0 %}₦{{ "{:,.0f}".format(md.budgeted) }}{% else %}—{% endif %}
+                </div>
+                {% if md.budgeted > 0 %}
+                <div style="font-size:10px; color:var(--muted);">spent: ₦{{ "{:,.0f}".format(md.actual) }}</div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+// ── Branch collapse / expand ──────────────────────────────────────────────────
+function toggleBranch(id) {
+  const body    = document.getElementById('branch-body-' + id);
+  const chevron = document.getElementById('chevron-' + id);
+  const open    = body.style.display !== 'none';
+  body.style.display      = open ? 'none'          : 'block';
+  chevron.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
+}
+
+// ── Auto-save monthly cells ───────────────────────────────────────────────────
+{% if period == 'monthly' %}
+const FMT = (v) => v.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+document.querySelectorAll('.budget-input').forEach(function(inp) {
+  function save() {
+    const brId  = inp.dataset.branch;
+    const catId = inp.dataset.category;
+    const statusEl = document.getElementById('status-' + brId + '-' + catId);
+    if (statusEl) statusEl.textContent = '⏳';
+
+    const fd = new FormData();
+    fd.append('branch_id',   brId);
+    fd.append('category_id', catId);
+    fd.append('year',        inp.dataset.year);
+    fd.append('month',       inp.dataset.month);
+    fd.append('amount',      inp.value || '0');
+
+    fetch('{{ url_for("budget.save_budget") }}', {method:'POST', body:fd})
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) {
+          if (statusEl) statusEl.textContent = '❌';
+          return;
+        }
+        if (statusEl) {
+          statusEl.textContent = '✓';
+          setTimeout(() => { statusEl.textContent = ''; }, 2000);
+        }
+
+        // Update monthly row
+        const actualEl    = document.getElementById('actual-'     + brId + '-' + catId);
+        const remainingEl = document.getElementById('remaining-'  + brId + '-' + catId);
+        const barEl       = document.getElementById('bar-'        + brId + '-' + catId);
+
+        if (actualEl)    actualEl.textContent    = FMT(data.actual);
+        if (remainingEl) {
+          remainingEl.textContent = data.budgeted > 0 ? FMT(data.remaining) : '—';
+          remainingEl.style.color = data.over ? '#f87171' : data.remaining > 0 ? 'var(--green)' : 'var(--muted)';
+        }
+        if (barEl) {
+          if (data.pct !== null && data.budgeted > 0) {
+            const pct   = Math.min(data.pct, 100);
+            const color = data.over ? '#f87171' : data.warn ? 'var(--orange)' : 'var(--green)';
+            barEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;background:var(--bg2);border-radius:4px;height:8px;overflow:hidden;">
+                <div style="height:100%;border-radius:4px;width:${pct}%;background:${color};"></div>
+              </div>
+              <span style="font-size:11px;color:${color};min-width:32px;text-align:right;">${data.pct}%</span>
+            </div>`;
+          } else {
+            barEl.innerHTML = '<span style="color:var(--dim);font-size:11px;">—</span>';
+          }
+        }
+
+        // ── Update yearly totals banner (id="yearly-bud-<brId>-<catId>") ──
+        // These elements exist if the page were in yearly mode; here we just
+        // store them in data attrs so a yearly tab reload shows correct values.
+        // The key benefit: no page reload needed — data is already committed.
+      })
+      .catch(() => { if (statusEl) statusEl.textContent = '❌'; });
+  }
+
+  inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+  });
+});
+{% endif %}
+
+// ── Dashboard budget alerts ───────────────────────────────────────────────────
+(function loadAlerts() {
+  fetch('{{ url_for("budget.budget_alerts") }}')
+    .then(r => r.json())
+    .then(alerts => {
+      if (!alerts.length) return;
+      const wrap  = document.getElementById('budget-alerts');
+      const inner = document.getElementById('budget-alerts-inner');
+      if (!wrap || !inner) return;
+      inner.innerHTML = alerts.map(a => `
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;
+                     background:${a.over ? 'rgba(248,113,113,.15)' : 'rgba(245,130,31,.12)'};
+                     border:1px solid ${a.over ? '#f87171' : 'var(--orange)'};
+                     color:${a.over ? '#f87171' : 'var(--orange2)'};">
+          ${a.over ? '🔴' : '🟡'} ${a.branch} · ${a.category} — ${a.pct}%
+        </span>`).join('');
+      wrap.style.display = 'block';
+    })
+    .catch(() => {});
+})();
+</script>
+{% endblock %}
