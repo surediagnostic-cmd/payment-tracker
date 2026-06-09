@@ -29,6 +29,10 @@ def _eager_pr():
     """Return a base query that pre-loads all lazy relationships."""
     return PaymentRequest.query.options(
         subqueryload(PaymentRequest.items).joinedload(PaymentRequestItem.category),
+        # Also eager-load sub-items and their categories
+        subqueryload(PaymentRequest.items)
+            .subqueryload(PaymentRequestItem.children)
+            .joinedload(PaymentRequestItem.category),
         joinedload(PaymentRequest.branch),
         joinedload(PaymentRequest.submitter),
     )
@@ -275,41 +279,40 @@ def new_request():
 
     if request.method == "POST":
         try:
+            import json as _json
+
             branch_id = int(request.form["branch_id"])
             valid_branch_ids = [b.id for b in current_user.branches]
             if branch_id not in valid_branch_ids:
                 flash("Invalid branch selection.", "error")
                 return redirect(url_for("requests.new_request"))
 
-            descriptions = request.form.getlist("descriptions[]")
-            category_ids = request.form.getlist("category_ids[]")
-            quantities   = request.form.getlist("quantities[]")
-            rates        = request.form.getlist("rates[]")
-            notes_list   = request.form.getlist("notes[]")
+            # ── Parse items from JSON payload (new sub-item-aware form) ──────────
+            items_json_str = request.form.get("items_json", "").strip()
+            if not items_json_str:
+                flash("Item data is missing. Please try again.", "error")
+                return redirect(url_for("requests.new_request"))
 
-            if not descriptions or not any(d.strip() for d in descriptions):
+            items_tree = _json.loads(items_json_str)
+            if not items_tree:
                 flash("At least one line item is required.", "error")
                 return redirect(url_for("requests.new_request"))
 
-            items_data = []
+            # ── Calculate total from leaf items only (no double-counting) ────────
             total = Decimal(0)
-            for i in range(len(descriptions)):
-                desc = descriptions[i].strip()
-                if not desc:
-                    continue
-                qty    = int(quantities[i])
-                rate   = Decimal(rates[i].replace(",", ""))
-                amount = qty * rate
-                total += amount
-                note   = notes_list[i].strip() if i < len(notes_list) else ""
-                items_data.append({
-                    "description": desc,
-                    "category_id": int(category_ids[i]),
-                    "quantity":    qty,
-                    "rate":        rate,
-                    "amount":      amount,
-                    "notes":       note or None,
-                })
+            for it in items_tree:
+                children = it.get("children") or []
+                if children:
+                    for c in children:
+                        try:
+                            total += int(str(c.get("quantity") or 1)) * Decimal(str(c.get("rate") or 0).replace(",", ""))
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        total += int(str(it.get("quantity") or 1)) * Decimal(str(it.get("rate") or 0).replace(",", ""))
+                    except Exception:
+                        pass
 
             ref = PaymentRequest.generate_reference(branch_id)
             pr = PaymentRequest(
@@ -326,16 +329,62 @@ def new_request():
             db.session.add(pr)
             db.session.flush()
 
-            for item in items_data:
-                db.session.add(PaymentRequestItem(request_id=pr.id, **item))
+            email_lines = []  # for notification email
+
+            for it in items_tree:
+                desc = (it.get("description") or "").strip()
+                if not desc:
+                    continue
+                children_data = it.get("children") or []
+                has_children  = bool(children_data)
+
+                if has_children:
+                    # Parent is a group-header: amount = 0 in DB (children carry amounts)
+                    p_qty    = 1
+                    p_rate   = Decimal(0)
+                    p_amount = Decimal(0)
+                else:
+                    p_qty    = int(str(it.get("quantity") or 1))
+                    p_rate   = Decimal(str(it.get("rate") or 0).replace(",", ""))
+                    p_amount = p_qty * p_rate
+                    email_lines.append(f"  • {desc} — ₦{p_amount:,.2f}")
+
+                parent_item = PaymentRequestItem(
+                    request_id  = pr.id,
+                    parent_id   = None,
+                    description = desc,
+                    category_id = int(it["category_id"]),
+                    quantity    = p_qty,
+                    rate        = p_rate,
+                    amount      = p_amount,
+                    notes       = (it.get("notes") or "").strip() or None,
+                )
+                db.session.add(parent_item)
+                db.session.flush()  # get parent_item.id
+
+                for c in children_data:
+                    cdesc = (c.get("description") or "").strip()
+                    if not cdesc:
+                        continue
+                    cqty    = int(str(c.get("quantity") or 1))
+                    crate   = Decimal(str(c.get("rate") or 0).replace(",", ""))
+                    camount = cqty * crate
+                    db.session.add(PaymentRequestItem(
+                        request_id  = pr.id,
+                        parent_id   = parent_item.id,
+                        description = cdesc,
+                        category_id = int(c["category_id"]),
+                        quantity    = cqty,
+                        rate        = crate,
+                        amount      = camount,
+                        notes       = (c.get("notes") or "").strip() or None,
+                    ))
+                    email_lines.append(f"    ↳ {cdesc} — ₦{camount:,.2f}")
 
             db.session.commit()
 
             mds_email = current_app.config.get("MDS_EMAIL")
             if mds_email:
-                item_lines = "\n".join(
-                    f"  • {it['description']} — ₦{it['amount']:,.2f}" for it in items_data
-                )
                 send_email(
                     to=mds_email,
                     subject=f"[Sure Finance] New Payment Request — {pr.reference}",
@@ -346,7 +395,7 @@ def new_request():
                         f"Total Requested: ₦{total:,.2f}\n"
                         f"Beneficiary: {pr.beneficiary_name} ({pr.beneficiary_bank})\n"
                         f"Submitted by: {current_user.name}\n\n"
-                        f"Items:\n{item_lines}\n\n"
+                        f"Items:\n" + "\n".join(email_lines) + "\n\n"
                         f"Please log in to review this request."
                     ),
                 )

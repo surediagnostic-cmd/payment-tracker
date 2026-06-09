@@ -82,14 +82,21 @@
           </tr>
         </thead>
         <tbody>
-          {% for item in pr.items %}
+          {% set ns = namespace(idx=0) %}
+          {% for item in pr.items if item.parent_id is none %}
+          {% set ns.idx = ns.idx + 1 %}
           <tr>
-            <td style="color:var(--dim);">{{ loop.index }}</td>
+            <td style="color:var(--dim);">{{ ns.idx }}</td>
             <td>
               <div style="color:var(--white); font-weight:500;">{{ item.description }}</div>
               {% if item.notes %}
               <div style="font-size:11px; color:var(--muted); margin-top:3px; font-style:italic;">
                 <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:3px;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>{{ item.notes }}
+              </div>
+              {% endif %}
+              {% if item.children %}
+              <div style="font-size:10px; color:var(--dim); margin-top:4px; letter-spacing:.3px;">
+                {{ item.children | length }} sub-item{{ 's' if item.children | length > 1 else '' }}
               </div>
               {% endif %}
             </td>
@@ -101,10 +108,34 @@
               <span class="badge badge-gray" style="font-size:10px;">Overhead</span>
               {% endif %}
             </td>
-            <td style="text-align:right; color:var(--muted);">{{ item.quantity }}</td>
-            <td style="text-align:right; color:var(--muted);">{{ "{:,.2f}".format(item.rate | float) }}</td>
-            <td style="text-align:right; font-weight:700; color:var(--white);">{{ "{:,.2f}".format(item.amount | float) }}</td>
+            <td style="text-align:right; color:var(--muted);">{% if item.children %}—{% else %}{{ item.quantity }}{% endif %}</td>
+            <td style="text-align:right; color:var(--muted);">{% if item.children %}—{% else %}{{ "{:,.2f}".format(item.rate | float) }}{% endif %}</td>
+            <td style="text-align:right; font-weight:700; color:var(--white);">{{ "{:,.2f}".format(item.display_amount) }}</td>
           </tr>
+          {% for child in item.children %}
+          <tr style="background:rgba(255,255,255,0.018);">
+            <td style="color:var(--dim); text-align:center; font-size:13px;">↳</td>
+            <td style="border-left:3px solid var(--orange-d); padding-left:14px;">
+              <div style="color:var(--white);">{{ child.description }}</div>
+              {% if child.notes %}
+              <div style="font-size:11px; color:var(--muted); margin-top:3px; font-style:italic;">
+                <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:3px;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>{{ child.notes }}
+              </div>
+              {% endif %}
+            </td>
+            <td><span class="badge badge-blue" style="font-size:10px; opacity:.8;">{{ child.category.name }}</span></td>
+            <td>
+              {% if child.category.cost_type == 'direct_cost' %}
+              <span class="badge badge-orange" style="font-size:9px; opacity:.8;">Direct Cost</span>
+              {% else %}
+              <span class="badge badge-gray" style="font-size:9px; opacity:.8;">Overhead</span>
+              {% endif %}
+            </td>
+            <td style="text-align:right; color:var(--dim); font-size:12px;">{{ child.quantity }}</td>
+            <td style="text-align:right; color:var(--dim); font-size:12px;">{{ "{:,.2f}".format(child.rate | float) }}</td>
+            <td style="text-align:right; font-weight:600; color:var(--muted); font-size:13px;">{{ "{:,.2f}".format(child.amount | float) }}</td>
+          </tr>
+          {% endfor %}
           {% endfor %}
         </tbody>
         <tfoot>

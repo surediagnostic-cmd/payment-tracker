@@ -10,6 +10,8 @@
   </div>
 
   <form method="POST" action="{{ url_for('requests.new_request') }}" id="prForm">
+    <!-- Items serialized as JSON on submit -->
+    <input type="hidden" id="items_json" name="items_json" value="">
 
     <!-- Payment header -->
     <div class="card" style="padding:28px; margin-bottom:20px;">
@@ -38,57 +40,66 @@
 
     <!-- Line items -->
     <div class="card" style="padding:28px; margin-bottom:20px;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
         <span>Line Items</span>
         <button type="button" onclick="addRow()" class="btn-outline" style="padding:5px 14px; font-size:12px;">+ Add Item</button>
       </div>
 
+      <!-- Column headers -->
+      <div style="display:grid; grid-template-columns:2fr 1.3fr 72px 110px 100px 34px; gap:10px; padding:0 0 8px 0; border-bottom:1px solid var(--border); margin-bottom:12px;">
+        <div class="label" style="font-size:10px; margin:0;">Description *</div>
+        <div class="label" style="font-size:10px; margin:0;">Category *</div>
+        <div class="label" style="font-size:10px; margin:0;">Qty *</div>
+        <div class="label" style="font-size:10px; margin:0;">Rate (₦) *</div>
+        <div class="label" style="font-size:10px; margin:0;">Amount (₦)</div>
+        <div></div>
+      </div>
+
       <div id="itemsContainer">
-        <!-- Row template filled by JS; one default row rendered here -->
-        <div class="item-row" style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
-          <div style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:8px;">
-            <div>
-              <label class="label" style="margin-bottom:4px;">Description *</label>
-              <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
-            </div>
-            <div>
-              <label class="label" style="margin-bottom:4px;">Category *</label>
-              <select name="category_ids[]" class="inp" required>
-                <option value="">— Select —</option>
-                {% for cat in categories %}
-                <option value="{{ cat.id }}">{{ cat.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label class="label" style="margin-bottom:4px;">Qty *</label>
-              <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
-            </div>
-            <div>
-              <label class="label" style="margin-bottom:4px;">Rate (₦) *</label>
-              <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
-            </div>
-            <div>
-              <label class="label" style="margin-bottom:4px;">Amount (₦)</label>
-              <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
-            </div>
-            <div style="padding-bottom:2px;">
-              <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px; display:none;">✕</button>
-            </div>
+        <!-- First item row (uid=0, rendered by Jinja2) -->
+        <div class="item-row" data-uid="0" style="margin-bottom:0;">
+          <div style="display:grid; grid-template-columns:2fr 1.3fr 72px 110px 100px 34px; gap:10px; align-items:center; margin-bottom:8px;">
+            <input data-field="description" class="inp" placeholder="e.g. Lab reagents batch" maxlength="255"
+                   style="font-size:13px;"/>
+            <select data-field="category_id" class="inp" style="font-size:13px;">
+              <option value="">— Select —</option>
+              {% for cat in categories %}
+              <option value="{{ cat.id }}">{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+            <input data-field="quantity" class="inp qty-input" type="number" placeholder="1" min="1" value="1"
+                   oninput="onRowInput(this.closest('.item-row'))" style="font-size:13px;"/>
+            <input data-field="rate" class="inp rate-input" placeholder="0.00"
+                   oninput="onRowInput(this.closest('.item-row'))" style="font-size:13px;"/>
+            <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:13px; text-align:right;">0.00</div>
+            <button type="button" class="btn-danger remove-btn" onclick="removeRow(0)"
+                    style="padding:8px 9px; font-size:13px; display:none;">✕</button>
           </div>
-          <!-- Note field — full width, optional -->
-          <div style="display:flex; align-items:center; gap:8px;">
-            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            <input type="text" name="notes[]" class="inp" placeholder="Note for this item (optional)"
-                   maxlength="500"
-                   style="flex:1; padding:7px 12px; font-size:12px; color:var(--muted);
-                          background:var(--bg); border-color:var(--dim);"/>
+          <!-- Note field -->
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <input data-field="notes" class="inp" placeholder="Note for this item (optional)" maxlength="500"
+                   style="flex:1; padding:6px 12px; font-size:12px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
           </div>
+          <!-- Sub-items container -->
+          <div class="sub-items" data-for="0" style="margin-left:18px; margin-bottom:0;"></div>
+          <!-- Add sub-item button -->
+          <div style="margin:6px 0 16px 0;">
+            <button type="button" onclick="addSubItem(0)"
+                    style="background:none; border:1px dashed var(--dim); color:var(--dim); padding:4px 14px;
+                           border-radius:5px; font-size:11px; cursor:pointer; transition:border-color .15s, color .15s;"
+                    onmouseover="this.style.borderColor='var(--orange-d)';this.style.color='var(--orange)';"
+                    onmouseout="this.style.borderColor='var(--dim)';this.style.color='var(--dim)';">
+              ↳ Add sub-item
+            </button>
+          </div>
+          <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
         </div>
       </div>
 
-      <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:8px; display:flex; justify-content:flex-end; align-items:center; gap:16px;">
-        <span style="font-size:13px; color:var(--muted); font-weight:600;">TOTAL REQUESTED</span>
+      <!-- Grand total -->
+      <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:4px; display:flex; justify-content:flex-end; align-items:center; gap:16px;">
+        <span style="font-size:12px; color:var(--muted); font-weight:600; letter-spacing:.5px;">TOTAL REQUESTED</span>
         <span id="grandTotal" style="font-size:22px; font-weight:800; color:var(--orange2);">₦0.00</span>
       </div>
     </div>
@@ -132,77 +143,297 @@
 </div>
 
 <script>
+// Category options string (shared across all rows)
 const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}">{{ cat.name }}</option>{% endfor %}`;
 
+let uidSeq = 1; // 0 is used by the static first row
 document.getElementById('dateField').value = new Date().toISOString().split('T')[0];
 
-function rowHtml() {
-  return `<div class="item-row" style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
-    <div style="display:grid; grid-template-columns:2fr 1.4fr 80px 120px 110px 36px; gap:10px; align-items:flex-end; margin-bottom:8px;">
-      <div>
-        <input type="text" name="descriptions[]" class="inp" placeholder="e.g. Lab reagents batch" required maxlength="255"/>
-      </div>
-      <div>
-        <select name="category_ids[]" class="inp" required>
-          <option value="">— Select —</option>
-          ${categoryOptions}
-        </select>
-      </div>
-      <div>
-        <input type="number" name="quantities[]" class="inp qty-input" placeholder="1" min="1" value="1" required oninput="calcGrandTotal()"/>
-      </div>
-      <div>
-        <input type="text" name="rates[]" class="inp rate-input" placeholder="0.00" required oninput="calcGrandTotal()"/>
-      </div>
-      <div>
-        <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:14px;">0.00</div>
-      </div>
-      <div style="padding-bottom:2px;">
-        <button type="button" onclick="removeRow(this)" class="btn-danger" style="padding:9px 10px; font-size:14px;">✕</button>
-      </div>
-    </div>
-    <div style="display:flex; align-items:center; gap:8px;">
-      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-      <input type="text" name="notes[]" class="inp" placeholder="Note for this item (optional)"
-             maxlength="500"
-             style="flex:1; padding:7px 12px; font-size:12px; color:var(--muted);
-                    background:var(--bg); border-color:var(--dim);"/>
-    </div>
-  </div>`;
+function genUid() { return uidSeq++; }
+
+// ── HTML builders ─────────────────────────────────────────────────────────────
+
+function subItemHtml(parentUid, uid) {
+  return `
+<div class="item-row" data-uid="${uid}" data-parent="${parentUid}"
+     style="background:rgba(255,255,255,0.025); border-left:3px solid var(--orange-d);
+            padding:10px 12px 10px 14px; border-radius:0 6px 6px 0; margin-bottom:8px;">
+  <div style="display:grid; grid-template-columns:2fr 1.3fr 72px 110px 100px 34px; gap:10px; align-items:center; margin-bottom:6px;">
+    <input data-field="description" class="inp" placeholder="Sub-item description" maxlength="255"
+           style="font-size:13px;"/>
+    <select data-field="category_id" class="inp" style="font-size:13px;">
+      <option value="">— Select —</option>
+      ${categoryOptions}
+    </select>
+    <input data-field="quantity" class="inp qty-input" type="number" placeholder="1" min="1" value="1"
+           style="font-size:13px;" oninput="onRowInput(this.closest('.item-row'))"/>
+    <input data-field="rate" class="inp rate-input" placeholder="0.00"
+           style="font-size:13px;" oninput="onRowInput(this.closest('.item-row'))"/>
+    <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:600; cursor:default; font-size:13px; text-align:right;">0.00</div>
+    <button type="button" class="btn-danger" onclick="removeSubItem(${uid}, ${parentUid})"
+            style="padding:8px 9px; font-size:13px;">✕</button>
+  </div>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    <input data-field="notes" class="inp" placeholder="Note (optional)" maxlength="500"
+           style="flex:1; padding:5px 10px; font-size:11px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
+  </div>
+</div>`;
 }
 
+function parentRowHtml(uid) {
+  return `
+<div class="item-row" data-uid="${uid}" style="margin-bottom:0;">
+  <div style="display:grid; grid-template-columns:2fr 1.3fr 72px 110px 100px 34px; gap:10px; align-items:center; margin-bottom:8px;">
+    <input data-field="description" class="inp" placeholder="e.g. Lab reagents" maxlength="255"
+           style="font-size:13px;"/>
+    <select data-field="category_id" class="inp" style="font-size:13px;">
+      <option value="">— Select —</option>
+      ${categoryOptions}
+    </select>
+    <input data-field="quantity" class="inp qty-input" type="number" placeholder="1" min="1" value="1"
+           oninput="onRowInput(this.closest('.item-row'))" style="font-size:13px;"/>
+    <input data-field="rate" class="inp rate-input" placeholder="0.00"
+           oninput="onRowInput(this.closest('.item-row'))" style="font-size:13px;"/>
+    <div class="inp row-total" style="background:var(--card2); color:var(--orange2); font-weight:700; cursor:default; font-size:13px; text-align:right;">0.00</div>
+    <button type="button" class="btn-danger remove-btn" onclick="removeRow(${uid})"
+            style="padding:8px 9px; font-size:13px;">✕</button>
+  </div>
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+    <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    <input data-field="notes" class="inp" placeholder="Note for this item (optional)" maxlength="500"
+           style="flex:1; padding:6px 12px; font-size:12px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
+  </div>
+  <div class="sub-items" data-for="${uid}" style="margin-left:18px;"></div>
+  <div style="margin:6px 0 16px 0;">
+    <button type="button" onclick="addSubItem(${uid})"
+            style="background:none; border:1px dashed var(--dim); color:var(--dim); padding:4px 14px;
+                   border-radius:5px; font-size:11px; cursor:pointer; transition:border-color .15s, color .15s;"
+            onmouseover="this.style.borderColor='var(--orange-d)';this.style.color='var(--orange)';"
+            onmouseout="this.style.borderColor='var(--dim)';this.style.color='var(--dim)';">
+      ↳ Add sub-item
+    </button>
+  </div>
+  <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
+</div>`;
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
 function addRow() {
-  const container = document.getElementById('itemsContainer');
-  container.insertAdjacentHTML('beforeend', rowHtml());
+  const uid = genUid();
+  document.getElementById('itemsContainer').insertAdjacentHTML('beforeend', parentRowHtml(uid));
   updateRemoveButtons();
 }
 
-function removeRow(btn) {
-  btn.closest('.item-row').remove();
+function addSubItem(parentUid) {
+  const uid = genUid();
+  const container = document.querySelector(`.sub-items[data-for="${parentUid}"]`);
+  container.insertAdjacentHTML('beforeend', subItemHtml(parentUid, uid));
+  refreshParentState(parentUid);
+  calcGrandTotal();
+}
+
+function removeRow(uid) {
+  // Find the direct child item-row (not a sub-item) with this uid
+  const row = document.querySelector(`#itemsContainer > .item-row[data-uid="${uid}"]`);
+  if (row) row.remove();
   calcGrandTotal();
   updateRemoveButtons();
 }
 
-function updateRemoveButtons() {
-  const rows = document.querySelectorAll('.item-row');
-  rows.forEach((row, i) => {
-    const btn = row.querySelector('button');
-    if (btn) btn.style.display = rows.length > 1 ? '' : 'none';
-  });
+function removeSubItem(uid, parentUid) {
+  const row = document.querySelector(`.item-row[data-uid="${uid}"][data-parent="${parentUid}"]`);
+  if (row) row.remove();
+  refreshParentState(parentUid);
+  calcGrandTotal();
+}
+
+// ── State management ──────────────────────────────────────────────────────────
+
+function refreshParentState(parentUid) {
+  const parentRow = document.querySelector(`#itemsContainer > .item-row[data-uid="${parentUid}"]`);
+  if (!parentRow) return;
+
+  const children   = document.querySelectorAll(`.item-row[data-parent="${parentUid}"]`);
+  const hasChildren = children.length > 0;
+  const qtyInput   = parentRow.querySelector('.qty-input');
+  const rateInput  = parentRow.querySelector('.rate-input');
+  const amountEl   = parentRow.querySelector('.row-total');
+
+  if (hasChildren) {
+    // Lock qty/rate; show child sum
+    if (!qtyInput.disabled) {
+      qtyInput.dataset.savedVal  = qtyInput.value;
+      rateInput.dataset.savedVal = rateInput.value;
+    }
+    qtyInput.disabled  = true;
+    rateInput.disabled = true;
+    qtyInput.style.opacity  = '0.3';
+    rateInput.style.opacity = '0.3';
+    qtyInput.placeholder    = '—';
+    rateInput.placeholder   = '—';
+    qtyInput.value  = '';
+    rateInput.value = '';
+
+    let sum = 0;
+    children.forEach(c => {
+      sum += parseFloat(c.querySelector('.row-total').textContent.replace(/,/g, '')) || 0;
+    });
+    amountEl.textContent = sum.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+    amountEl.title = 'Derived from sub-items';
+  } else {
+    // Restore qty/rate
+    qtyInput.disabled  = false;
+    rateInput.disabled = false;
+    qtyInput.style.opacity  = '1';
+    rateInput.style.opacity = '1';
+    qtyInput.placeholder    = '1';
+    rateInput.placeholder   = '0.00';
+    qtyInput.value  = qtyInput.dataset.savedVal  || '1';
+    rateInput.value = rateInput.dataset.savedVal || '';
+
+    const qty  = parseFloat(qtyInput.value) || 0;
+    const rate = parseFloat((rateInput.value || '').replace(/,/g, '')) || 0;
+    amountEl.textContent = (qty * rate).toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+    amountEl.title = '';
+  }
+}
+
+function onRowInput(row) {
+  const qtyInput  = row.querySelector('.qty-input');
+  const rateInput = row.querySelector('.rate-input');
+  // Save values so they survive disable/re-enable
+  if (qtyInput  && !qtyInput.disabled)  qtyInput.dataset.savedVal  = qtyInput.value;
+  if (rateInput && !rateInput.disabled) rateInput.dataset.savedVal = rateInput.value;
+
+  const parentAttr = row.dataset.parent;
+  if (parentAttr !== undefined && parentAttr !== '') {
+    // Sub-item: update own amount then bubble up
+    const qty  = parseFloat(qtyInput.value)  || 0;
+    const rate = parseFloat((rateInput.value || '').replace(/,/g, '')) || 0;
+    row.querySelector('.row-total').textContent =
+      (qty * rate).toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+    refreshParentState(parseInt(parentAttr));
+  } else {
+    // Top-level item with no children
+    const uid      = row.dataset.uid;
+    const children = document.querySelectorAll(`.item-row[data-parent="${uid}"]`);
+    if (children.length === 0) {
+      const qty  = parseFloat(qtyInput.value)  || 0;
+      const rate = parseFloat((rateInput.value || '').replace(/,/g, '')) || 0;
+      row.querySelector('.row-total').textContent =
+        (qty * rate).toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+  }
+  calcGrandTotal();
 }
 
 function calcGrandTotal() {
   let grand = 0;
-  document.querySelectorAll('.item-row').forEach(row => {
-    const qty  = parseFloat(row.querySelector('.qty-input').value) || 0;
-    const rate = parseFloat(row.querySelector('.rate-input').value.replace(/,/g,'')) || 0;
-    const amt  = qty * rate;
-    grand += amt;
-    row.querySelector('.row-total').textContent = amt.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+  // Sum only top-level items (direct children of #itemsContainer)
+  document.querySelectorAll('#itemsContainer > .item-row').forEach(row => {
+    grand += parseFloat(row.querySelector('.row-total').textContent.replace(/,/g, '')) || 0;
   });
-  document.getElementById('grandTotal').textContent = '₦' + grand.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById('grandTotal').textContent =
+    '₦' + grand.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
+function updateRemoveButtons() {
+  const rows = document.querySelectorAll('#itemsContainer > .item-row');
+  rows.forEach(row => {
+    const btn = row.querySelector('.remove-btn');
+    if (btn) btn.style.display = rows.length > 1 ? '' : 'none';
+  });
+}
+
+// ── Form submission: serialize to JSON ────────────────────────────────────────
+
+document.getElementById('prForm').addEventListener('submit', function(e) {
+  const items = [];
+  let valid = true;
+
+  document.querySelectorAll('#itemsContainer > .item-row').forEach(parentRow => {
+    if (!valid) return;
+    const uid   = parentRow.dataset.uid;
+    const desc  = (parentRow.querySelector('[data-field="description"]').value || '').trim();
+    const catId = parentRow.querySelector('[data-field="category_id"]').value;
+
+    if (!desc) {
+      e.preventDefault();
+      alert('All item descriptions are required.');
+      valid = false; return;
+    }
+    if (!catId) {
+      e.preventDefault();
+      alert('Please select a category for every item.');
+      valid = false; return;
+    }
+
+    // Collect sub-items
+    const children = [];
+    parentRow.querySelectorAll(`.item-row[data-parent="${uid}"]`).forEach(childRow => {
+      if (!valid) return;
+      const cDesc  = (childRow.querySelector('[data-field="description"]').value || '').trim();
+      const cCatId = childRow.querySelector('[data-field="category_id"]').value;
+      if (!cDesc) {
+        e.preventDefault();
+        alert('All sub-item descriptions are required.');
+        valid = false; return;
+      }
+      if (!cCatId) {
+        e.preventDefault();
+        alert('Please select a category for every sub-item.');
+        valid = false; return;
+      }
+      const cQty  = childRow.querySelector('[data-field="quantity"]').value  || '1';
+      const cRate = (childRow.querySelector('[data-field="rate"]').value || '').replace(/,/g, '') || '0';
+      if (parseFloat(cRate) <= 0) {
+        e.preventDefault();
+        alert('Rate must be greater than zero for all sub-items.');
+        valid = false; return;
+      }
+      children.push({
+        description: cDesc,
+        category_id: cCatId,
+        quantity:    cQty,
+        rate:        cRate,
+        notes:       (childRow.querySelector('[data-field="notes"]').value || '').trim(),
+      });
+    });
+
+    const hasChildren = children.length > 0;
+    const pQty  = hasChildren ? '1' : (parentRow.querySelector('[data-field="quantity"]').value || '1');
+    const pRate = hasChildren ? '0' : ((parentRow.querySelector('[data-field="rate"]').value || '').replace(/,/g, '') || '0');
+
+    if (!hasChildren && parseFloat(pRate) <= 0) {
+      e.preventDefault();
+      alert('Rate must be greater than zero for all items.');
+      valid = false; return;
+    }
+
+    items.push({
+      description: desc,
+      category_id: catId,
+      quantity:    pQty,
+      rate:        pRate,
+      notes:       (parentRow.querySelector('[data-field="notes"]').value || '').trim(),
+      children:    children,
+    });
+  });
+
+  if (!valid) return;
+
+  if (items.length === 0) {
+    e.preventDefault();
+    alert('At least one line item is required.');
+    return;
+  }
+
+  document.getElementById('items_json').value = JSON.stringify(items);
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 updateRemoveButtons();
 </script>
 {% endblock %}

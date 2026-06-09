@@ -249,8 +249,23 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] item notes: {e}")
 
-    # 6. Create budgets table if missing (db.create_all handles new deployments;
-    #    this migration covers existing deployments that already have other tables)
+    # 6b. Add parent_id column to payment_request_items if missing
+    if 'payment_request_items' in tables:
+        item_cols = {c['name'] for c in insp.get_columns('payment_request_items')}
+        if 'parent_id' not in item_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_request_items "
+                    "ADD COLUMN parent_id INTEGER REFERENCES payment_request_items(id) ON DELETE SET NULL"
+                ))
+                db.session.commit()
+                print("[migration] added parent_id column to payment_request_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] parent_id: {e}")
+
+    # 7. Create budgets table if missing (db.create_all handles new deployments;
+    #    this covers existing deployments that already have the other tables)
     if 'budgets' not in tables:
         try:
             db.session.execute(text("""

@@ -98,13 +98,40 @@ class PaymentRequestItem(db.Model):
     __tablename__ = "payment_request_items"
     id = db.Column(db.Integer, primary_key=True)
     request_id = db.Column(db.Integer, db.ForeignKey('payment_requests.id'), nullable=False)
+    # Self-referential FK: NULL = top-level item, non-NULL = sub-item of parent
+    # ON DELETE SET NULL so deleting a parent item doesn't violate FK on siblings
+    parent_id = db.Column(
+        db.Integer,
+        db.ForeignKey('payment_request_items.id', ondelete='SET NULL'),
+        nullable=True,
+    )
     description = db.Column(db.String(255), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
     rate = db.Column(db.Numeric(14, 2), nullable=False)
+    # For parent items with children: amount stored as 0; children carry the actual amounts.
+    # This prevents double-counting in financial aggregations.
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     notes = db.Column(db.String(500), nullable=True)
     category = db.relationship('Category')
+    # Children (sub-items) of this item
+    children = db.relationship(
+        'PaymentRequestItem',
+        primaryjoin='PaymentRequestItem.parent_id == PaymentRequestItem.id',
+        foreign_keys='[PaymentRequestItem.parent_id]',
+        lazy=True,
+        order_by='PaymentRequestItem.id',
+    )
+
+    @property
+    def display_amount(self):
+        """Amount to display: sum of children for group-header items, else own amount."""
+        try:
+            if self.children:
+                return sum(float(c.amount) for c in self.children)
+        except Exception:
+            pass
+        return float(self.amount)
 
 
 class Budget(db.Model):
