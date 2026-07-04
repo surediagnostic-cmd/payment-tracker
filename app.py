@@ -334,6 +334,193 @@ def _seed_defaults():
         db.session.commit()
         print("Default MDS account created: admin@surediagnostics.com / Admin@1234")
 
+    _seed_inventory()
+
+
+def _seed_inventory():
+    """Seed initial reagents/consumables and packages if tables are empty."""
+    from models import InventoryItem, PackageCatalogue
+
+    if InventoryItem.query.count() == 0:
+        # (name, code, category, unit, pack_size, unit_price, notes)
+        ITEMS = [
+            ("BIL INDIRECT/DIRECT","s051","lab_reagent","test",60,150.0,"elba, 8550 for 120 mls"),
+            ("BILIRUBIN TOT.","s050","lab_reagent","test",None,100.0,None),
+            ("PIPETTE","S193","lab_consumable","piece",None,None,None),
+            ("3% ACID ALCHO","s076","lab_reagent","ml",None,2.5,None),
+            ("ACCU CHECK BATTERY",None,"lab_consumable","piece",None,None,None),
+            ("ACCU CHECK STRIP","s190","lab_consumable","strip",None,None,None),
+            ("ACETATE PAPER","s017","lab_consumable","piece",None,10.0,None),
+            ("ACETONE","s075","lab_reagent","ml",None,7.5,None),
+            ("ACTIVATION REAGENT",None,"lab_reagent","ml",None,None,"ELECTROLYTES (NA,K,CL,CA,PH) = 10ML = 7500"),
+            ("ACTIVE STRIP","S192","lab_consumable","strip",None,None,None),
+            ("AFB STRIP","s064","lab_consumable","strip",None,280.0,None),
+            ("ALBUMIN","s052","lab_reagent","test",None,100.0,None),
+            ("ALP","s049","lab_reagent","test",None,None,"ELBA 15741 for 120mls; Panel: LIVER FUNCTION TEST"),
+            ("ALT",None,"lab_reagent","test",None,None,"ELBA 13316 FOR 200mls; Panel: LIVER FUNCTION TEST"),
+            ("AMYLASE","s055","lab_reagent","test",None,100.0,None),
+            ("ANTI HUMAN GLO","s024","lab_reagent","test",None,200.0,None),
+            ("ANTISERA A","s008","lab_reagent","test",None,200.0,"Panel: BLOOD GROUP"),
+            ("ANTISERA B","s009","lab_reagent","test",None,200.0,"Panel: BLOOD GROUP"),
+            ("ANTISERA C","s010","lab_reagent","test",None,200.0,"Panel: BLOOD GROUP"),
+            ("ANTISERA D","S193","lab_reagent","test",None,1500.0,"Panel: BLOOD GROUP"),
+            ("AST",None,"lab_reagent","test",None,None,"ELBA 13316 200MLS; Panel: LIVER FUNCTION TEST"),
+            ("BOX FOR LAB","22_","lab_consumable","piece",None,None,None),
+            ("BUFFER SOLUTION","s016","lab_reagent","ml",None,5.0,None),
+            ("C-CALIBRATION",None,"lab_reagent","ml",None,None,"CALIBRATE TOTAL HCO3 = 10MLS = 7000"),
+            ("CALCIUM","s043","lab_reagent","test",None,400.0,None),
+            ("CALIBRATION A",None,"lab_reagent","ml",None,None,"ELECTROLYTES = 400ML = 13500"),
+            ("CALIBRATION B",None,"lab_reagent","ml",None,None,"ELECTROLYTES = 200ML = 9500"),
+            ("CAPILLARY TUBE","s011","lab_consumable","piece",100,7.0,None),
+            ("CATHETER","s174","lab_consumable","piece",None,None,None),
+            ("CHLORINE","s036","lab_reagent","ml",None,50.0,None),
+            ("CHOLESTEROL","s059","lab_reagent","test",None,None,"Panel: FULL LIPID PROFILE"),
+            ("COMBI 2","S198","lab_consumable","strip",None,1500.0,None),
+            ("COMBI 10","s046","lab_consumable","strip",None,30.0,None),
+            ("COTTON WOOL","s002","lab_consumable","piece",100,100.0,None),
+            ("COVER SLIP","s027","lab_consumable","piece",100,8.0,None),
+            ("CREATININE","124_","lab_reagent","test",None,None,"E&U + CR"),
+            ("CRYSTAL VIOLENT","s074","lab_reagent","ml",None,2.5,None),
+            ("DEPROTEINIZER",None,"lab_reagent","ml",None,None,"ELECTROLYTES = 10MLS = 7000"),
+            ("DISPOSABLE SPECULUM","s173","lab_consumable","piece",None,None,None),
+            ("DISTIL WATER","s040","lab_reagent","ml",None,4.0,None),
+            ("EDTA BOTTLE","119_","lab_consumable","piece",50,16.0,None),
+            ("ENVELOPE","116_","lab_consumable","piece",25,8.0,"Panel: STATIONARY"),
+            ("ESR TUBE","s179","lab_consumable","piece",None,None,None),
+            ("EVA WATER",None,"lab_consumable","piece",None,None,None),
+            ("FACE MASK","s178","lab_consumable","piece",None,None,None),
+            ("FIELD STAIN A","s019","lab_reagent","ml",None,10.0,None),
+            ("FIELD STAIN B","s020","lab_reagent","ml",None,10.0,None),
+            ("FILTER PAPER","122_","lab_consumable","piece",None,None,None),
+            ("FLORIDE OXALATE","s091","lab_consumable","piece",None,None,None),
+            ("FOETAL SHIELD",None,"lab_consumable","piece",None,None,None),
+            ("FSH REAGENT",None,"lab_reagent","test",98,97000.0,"Panel: HORMONES; 98 samples/pack"),
+            ("GGT","s061","lab_reagent","test",None,None,"Panel: LIVER FUNCTION TEST"),
+            ("GIEMSA STAIN","s022","lab_reagent","ml",None,4.0,None),
+            ("GIFT / HAND TOWEL","117_","lab_consumable","piece",None,None,None),
+            ("GLOVE","s001","lab_consumable","pair",100,100.0,None),
+            ("GLUCOSE","s045","lab_reagent","test",None,None,None),
+            ("GRAM STAIN A","s078","lab_reagent","ml",None,2.5,None),
+            ("GRAM STAIN B","s079","lab_reagent","ml",None,2.5,None),
+            ("GRAM STAIN C","s080","lab_reagent","ml",None,2.5,None),
+            ("GRAM STAIN D","s081","lab_reagent","ml",None,2.5,None),
+            ("H PYLORI STRIP","s130","lab_consumable","strip",None,650.0,None),
+            ("HBA1C STRIP","s195","lab_consumable","strip",None,None,None),
+            ("HDL","s063","lab_reagent","test",None,None,"Panel: FULL LIPID PROFILE"),
+            ("HEP B STRIP","s131","lab_consumable","strip",50,80.0,None),
+            ("HEP C STRIP","s132","lab_consumable","strip",None,80.0,None),
+            ("HIV STRIP (DETERMINE)","s133","lab_consumable","strip",None,None,None),
+            ("HIV STRIP (STAT-PAK)","s134","lab_consumable","strip",None,None,None),
+            ("HIV STRIP (UNIGOLD)","s135","lab_consumable","strip",None,None,None),
+            ("IODINE","s082","lab_reagent","ml",None,1.5,None),
+            ("IRON","s044","lab_reagent","test",None,None,None),
+            ("LABSMART ICT","118_","lab_consumable","piece",None,None,None),
+            ("LACTOPHENOL","s083","lab_reagent","ml",None,2.5,None),
+            ("LDL",None,"lab_reagent","test",None,None,"Panel: FULL LIPID PROFILE"),
+            ("LH REAGENT",None,"lab_reagent","test",None,None,"Panel: HORMONES"),
+            ("LIPASE","s060","lab_reagent","test",None,None,None),
+            ("LITHIUM HEPARIN","s069","lab_consumable","piece",None,None,None),
+            ("LUGOL IODINE","s084","lab_reagent","ml",None,1.5,None),
+            ("MAGNESIUM","s047","lab_reagent","test",None,400.0,None),
+            ("MALARIA (RAPID)",None,"lab_consumable","strip",None,None,None),
+            ("MANSONI TAPE","s029","lab_consumable","piece",None,5.0,None),
+            ("METHYLATED SPIRIT","s079","lab_reagent","ml",None,5.0,None),
+            ("METHYLENE BLUE","s085","lab_reagent","ml",None,2.5,None),
+            ("MICROSCOPE SLIDE","s028","lab_consumable","piece",72,10.0,None),
+            ("NITRILE GLOVE","s001a","lab_consumable","pair",100,200.0,None),
+            ("PHOSPHATE","s048","lab_reagent","test",None,None,None),
+            ("PLAIN BOTTLE","s112","lab_consumable","piece",None,None,None),
+            ("POTASSIUM REAGENT","s038","lab_reagent","test",None,None,"Panel: ELECTROLYTES"),
+            ("PRL REAGENT",None,"lab_reagent","test",None,None,"Panel: HORMONES"),
+            ("PROGESTERONE REAGENT",None,"lab_reagent","test",None,None,"Panel: HORMONES"),
+            ("PSA REAGENT",None,"lab_reagent","test",None,None,None),
+            ("RAPIDE WIDAL","s148","lab_consumable","strip",None,300.0,None),
+            ("REPORT SHEET","s115","lab_consumable","piece",None,None,None),
+            ("RINGERS LACTATE","s113","lab_consumable","piece",None,None,None),
+            ("SERUM PROGESTERONE",None,"lab_reagent","test",None,None,"Panel: HORMONES"),
+            ("SODIUM CHLORIDE","s039","lab_reagent","ml",None,2.0,None),
+            ("SODIUM REAGENT","s037","lab_reagent","test",None,None,"Panel: ELECTROLYTES"),
+            ("STERILE SWAB","s003","lab_consumable","piece",None,50.0,None),
+            ("STOOL CONTAINER","s114","lab_consumable","piece",None,None,None),
+            ("SULFOSALICYLIC ACID","s086","lab_reagent","ml",None,2.0,None),
+            ("SYRINGE (5ML)","s097","lab_consumable","piece",None,20.0,None),
+            ("SYRINGE (2ML)","s096","lab_consumable","piece",None,10.0,None),
+            ("TEST TUBE","s102","lab_consumable","piece",None,None,None),
+            ("TESTOSTERONE REAGENT",None,"lab_reagent","test",None,None,"Panel: HORMONES"),
+            ("THIOGLYCOLLATE BROTH","s104","lab_reagent","ml",None,None,None),
+            ("TIGECYCLINE DISC","s105","lab_consumable","piece",None,None,None),
+            ("TOTAL PROTEIN","s068","lab_reagent","test",None,100.0,None),
+            ("TRIGLYCERIDES","s066","lab_reagent","test",None,None,"Panel: FULL LIPID PROFILE"),
+            ("TROPONIN STRIP",None,"lab_consumable","strip",None,None,None),
+            ("TSH REAGENT",None,"lab_reagent","test",None,None,"Panel: THYROID"),
+            ("T3 REAGENT",None,"lab_reagent","test",None,None,"Panel: THYROID"),
+            ("T4 REAGENT",None,"lab_reagent","test",None,None,"Panel: THYROID"),
+            ("TYPHIDOT STRIP","s149","lab_consumable","strip",None,600.0,None),
+            ("UREA REAGENT","s108","lab_reagent","test",None,None,"Panel: E&U"),
+            ("URIC ACID","s053","lab_reagent","test",None,None,None),
+            ("URINE CONTAINER","s111","lab_consumable","piece",None,None,None),
+            ("VDRL ANTIGEN","s167","lab_reagent","test",None,200.0,None),
+            ("WIDAL TEST KIT","s169","lab_reagent","test",None,300.0,None),
+            ("WRIGHT STAIN","s023","lab_reagent","ml",None,4.0,None),
+            ("XYLENE","s087","lab_reagent","ml",None,None,None),
+            ("ZIEHL NEELSEN STAIN A","s088","lab_reagent","ml",None,2.5,None),
+            ("ZIEHL NEELSEN STAIN B","s089","lab_reagent","ml",None,2.5,None),
+            ("ZINC SULPHATE","s090","lab_reagent","ml",None,2.0,None),
+            # USG / Radiology consumables
+            ("ULTRASOUND GEL",None,"usg","tube",None,None,None),
+            ("X-RAY FILM",None,"xray","piece",None,None,None),
+            ("X-RAY DEVELOPER",None,"xray","ml",None,None,None),
+            ("X-RAY FIXER",None,"xray","ml",None,None,None),
+            ("ECG ELECTRODE",None,"ecg","piece",None,None,None),
+            ("ECG PAPER",None,"ecg","roll",None,None,None),
+            ("ECG GEL",None,"ecg","tube",None,None,None),
+            ("PRINTER PAPER",None,"general","ream",None,None,None),
+        ]
+        for (name, code, cat, unit, pack, price, notes) in ITEMS:
+            db.session.add(InventoryItem(
+                name=name, item_code=code, category=cat, unit=unit,
+                pack_size=pack, unit_price=price, notes=notes,
+            ))
+        try:
+            db.session.commit()
+            print(f"[seed] {len(ITEMS)} inventory items seeded")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[seed] inventory items: {e}")
+
+    if PackageCatalogue.query.count() == 0:
+        PACKAGES = [
+            "SURE COMPLETE HEALTH PACKAGE",
+            "SURE KIDNEY HEALTH PACKAGE",
+            "DIABETES SCREENING",
+            "SURE VITAL HEALTH PLAN",
+            "SURE HEART HEALTH PACKAGE",
+            "SURE ESSENTIAL HEALTH CHECK MALE 4OYRS & ABOVE",
+            "SURE ESSENTIAL HEALTH CHECK <40YRS (MALE & FEMALE)",
+            "SURE BASIC HEALTH CHECK <40YRS (MALE & FEMALE)",
+            "SURE ESSENTIAL HEALTH CHECK FEMALE 4OYRS & ABOVE",
+            "FOOD HANDLERS SCREENING_BASIC",
+            "DOMESTIC HELPER CHECK UP",
+            "KIDS HEALTH PLAN",
+            "SURE PROSTATE HEALTH PACKAGE",
+            "SURE COLON HEALTH PACKAGE",
+            "SURE PRE MARITAL MEDICAL SCREENING",
+            "ANTENATAL PACKAGE~ STANDARD",
+            "ANTENATAL PACKAGE~ BASIC",
+            "SURE BREAST HEALTH PACKAGE",
+            "SURE ESSENTIAL HEALTH PACKAGE ~ STANDARD",
+            "SURE ESSENTIAL HEALTH PACKAGE ~ BASIC",
+            "SURE CERVICAL CANCER PREVENTION PACKAGE",
+        ]
+        for name in PACKAGES:
+            db.session.add(PackageCatalogue(name=name, labsmart_name=name))
+        try:
+            db.session.commit()
+            print(f"[seed] {len(PACKAGES)} packages seeded")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[seed] packages: {e}")
+
 
 app = create_app()
 
