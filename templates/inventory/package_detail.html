@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ package.name }}{% endblock %}
+{% block page_title %}Inventory — {{ package.name }}{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
+  <a href="{{ url_for('inventory.packages') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Packages</a>
+  <span style="color:var(--dim);">/</span>
+  <span style="color:var(--white); font-size:13px;">{{ package.name }}</span>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+  {# Info #}
+  <div class="card" style="padding:22px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:12px;">
+      <div>
+        <div style="font-size:18px; font-weight:800; color:var(--white);">{{ package.name }}</div>
+        <div style="color:var(--muted); font-size:12px; margin-top:4px;">LIS: {{ package.labsmart_name }}</div>
+      </div>
+      {% if package.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}
+    </div>
+    <div style="color:var(--muted); font-size:13px; margin-bottom:14px;">
+      {{ package.tests|length }} test{{ 's' if package.tests|length != 1 }} included
+    </div>
+    <button onclick="document.getElementById('editModal').style.display='flex'" class="btn-outline" style="font-size:12px; padding:7px 14px;">Edit Package</button>
+  </div>
+
+  {# Manage tests #}
+  <div class="card" style="padding:22px;">
+    <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Manage Constituent Tests</div>
+    <form method="post" action="{{ url_for('inventory.update_package_tests', pkg_id=package.id) }}">
+      <div style="max-height:240px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:14px; display:flex; flex-direction:column; gap:6px;">
+        {% for test in all_tests %}
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 6px; border-radius:6px; transition:background .15s;" onmouseover="this.style.background='rgba(245,130,31,.08)'" onmouseout="this.style.background='transparent'">
+          <input type="checkbox" name="test_ids[]" value="{{ test.id }}"
+            {% if test.id in linked_ids %}checked{% endif %}
+            style="accent-color:var(--orange); width:14px; height:14px;">
+          <span style="color:var(--text);">{{ test.name }}</span>
+          <span class="badge badge-blue" style="font-size:9px; padding:2px 6px;">{{ test.case_type_label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn-primary" style="width:100%;">Save Test List</button>
+    </form>
+  </div>
+</div>
+
+{# Current test list #}
+{% if package.tests %}
+<div class="card" style="padding:22px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Included Tests</div>
+  <table>
+    <thead><tr><th>Test Name</th><th>LIS Name</th><th>Case Type</th><th>Reagents</th></tr></thead>
+    <tbody>
+      {% for pt in package.tests %}
+      <tr>
+        <td><a href="{{ url_for('inventory.test_detail', test_id=pt.test.id) }}" style="color:var(--orange2);">{{ pt.test.name }}</a></td>
+        <td style="color:var(--muted); font-size:12px;">{{ pt.test.labsmart_name }}</td>
+        <td><span class="badge badge-blue">{{ pt.test.case_type_label }}</span></td>
+        <td>
+          {% set n = pt.test.reagent_mappings|length %}
+          {% if n %}<span class="badge badge-green">{{ n }}</span>{% else %}<span class="badge badge-gray">0</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# Edit Modal #}
+<div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:460px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Edit Package</div>
+      <button onclick="document.getElementById('editModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.edit_package', pkg_id=package.id) }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label class="label">Package Name *</label>
+          <input name="name" class="inp" value="{{ package.name }}" required>
+        </div>
+        <div>
+          <label class="label">LIS Name *</label>
+          <input name="labsmart_name" class="inp" value="{{ package.labsmart_name }}" required>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Save Changes</button>
+        <button type="button" onclick="document.getElementById('editModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
