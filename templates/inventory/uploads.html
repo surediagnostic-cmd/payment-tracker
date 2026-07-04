@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}LIS Uploads{% endblock %}
+{% block page_title %}Inventory — LIS Uploads{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">LIS Uploads</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">Upload LabSmartLIS CSV exports to auto-deplete inventory</div>
+  </div>
+  <button onclick="document.getElementById('uploadModal').style.display='flex'" class="btn-primary">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Upload CSV
+  </button>
+</div>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr>
+      <th>Filename</th><th>Period</th><th>Cases</th><th>Matched</th><th>Unmatched</th><th>Status</th><th>Uploaded</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for u in uploads %}
+      <tr>
+        <td style="font-weight:600; color:var(--white);">{{ u.filename }}</td>
+        <td style="color:var(--muted); font-size:12px;">
+          {% if u.start_date and u.end_date %}
+            {{ u.start_date.strftime('%d %b') }} – {{ u.end_date.strftime('%d %b %Y') }}
+          {% elif u.start_date %}
+            {{ u.start_date.strftime('%d %b %Y') }}
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ u.record_count }}</td>
+        <td style="color:var(--green);">{{ u.matched_count }}</td>
+        <td style="color:{{ 'var(--red)' if u.unmatched_count else 'var(--muted)' }};">{{ u.unmatched_count }}</td>
+        <td>
+          {% if u.status == 'applied' %}
+            <span class="badge badge-green">Applied</span>
+          {% else %}
+            <span class="badge badge-yellow">Pending Review</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--dim); font-size:12px;">
+          {{ u.created_at.strftime('%d %b %Y %H:%M') }}<br>
+          <span style="color:var(--muted);">{{ u.uploader.name if u.uploader else '—' }}</span>
+        </td>
+        <td>
+          <a href="{{ url_for('inventory.upload_review', upload_id=u.id) }}"
+             class="btn-outline" style="font-size:11px; padding:5px 10px;">
+            {{ 'View' if u.status == 'applied' else 'Review' }}
+          </a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center; color:var(--muted); padding:50px;">
+        No uploads yet. Upload a LabSmartLIS bills CSV to start tracking consumption.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="padding:20px; margin-top:20px; border-color:var(--border2);">
+  <div style="font-size:13px; font-weight:700; color:var(--white); margin-bottom:8px;">How it works</div>
+  <ol style="color:var(--muted); font-size:13px; line-height:1.9; padding-left:18px;">
+    <li>Export the <strong style="color:var(--text);">Bills</strong> report from LabSmartLIS as CSV</li>
+    <li>Upload it here — the system parses each case's investigations and fuzzy-matches them against your test catalogue</li>
+    <li>Review any unmatched names (map them to the correct test or skip)</li>
+    <li>Click <strong style="color:var(--orange2);">Apply</strong> — reagents are depleted from stock based on the test-reagent mappings you've configured</li>
+  </ol>
+</div>
+
+{# Upload Modal #}
+<div id="uploadModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Upload LabSmartLIS CSV</div>
+      <button onclick="document.getElementById('uploadModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.upload_lis') }}" enctype="multipart/form-data">
+      <div style="margin-bottom:16px;">
+        <label class="label">Bills CSV File *</label>
+        <input name="csv_file" type="file" accept=".csv" required
+          style="background:var(--bg2); border:1px dashed var(--border2); border-radius:9px; padding:14px; width:100%; color:var(--text); font-family:inherit; font-size:13px; cursor:pointer;">
+      </div>
+      <div style="background:var(--blue-d); border:1px solid rgba(74,159,212,.2); border-radius:8px; padding:12px; font-size:12px; color:var(--blue2); margin-bottom:18px;">
+        Expected columns: <code>Case Id, Case Type, Date, Investigations, Collection centre, Canceled</code>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn-primary">Upload &amp; Parse</button>
+        <button type="button" onclick="document.getElementById('uploadModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
