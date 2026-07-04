@@ -44,6 +44,14 @@ class User(UserMixin, db.Model):
         return self.role == "mds"
 
     @property
+    def is_lab_staff(self):
+        return self.role == "lab_staff"
+
+    @property
+    def can_view_inventory(self):
+        return self.role in ("mds", "accountant", "lab_staff")
+
+    @property
     def branch(self):
         """Backward-compat helper — returns the first assigned branch or None."""
         return self.branches[0] if self.branches else None
@@ -137,13 +145,13 @@ class Budget(db.Model):
     """Planned spending per branch + category + period.
 
     period_type | year | month | week
-    'monthly'   |  Y   |   Y   | null  ? one calendar month
-    'yearly'    |  Y   | null  | null  ? full calendar year
-    'weekly'    |  Y   |   Y   |  Y    ? week 1-4 of a month
-                                           week 1 = days 1-7
-                                           week 2 = days 8-14
-                                           week 3 = days 15-21
-                                           week 4 = days 22-end
+    'monthly'   |  Y   |   Y   | null  → one calendar month
+    'yearly'    |  Y   | null  | null  → full calendar year
+    'weekly'    |  Y   |   Y   |  Y   → week 1-4 of a month
+                                         week 1 = days 1-7
+                                         week 2 = days 8-14
+                                         week 3 = days 15-21
+                                         week 4 = days 22-end
     """
     __tablename__ = "budgets"
     id = db.Column(db.Integer, primary_key=True)
@@ -170,3 +178,198 @@ class Budget(db.Model):
             name='uq_budget_period'
         ),
     )
+
+
+# ─── Inventory Management ────────────────────────────────────────────────────
+
+ITEM_CATEGORY_LABELS = {
+    'lab_reagent':   'Lab Reagent',
+    'lab_consumable':'Lab Consumable',
+    'usg':           'USG Consumable',
+    'xray':          'X-Ray / Imaging',
+    'ecg':           'ECG',
+    'general':       'General',
+}
+
+CASE_TYPE_LABELS = {
+    'lab':  'Lab',
+    'usg':  'USG',
+    'xray': 'X-Ray',
+    'ecg':  'ECG',
+}
+
+
+class InventoryItem(db.Model):
+    __tablename__ = "inventory_items"
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(200), nullable=False)
+    item_code   = db.Column(db.String(50),  nullable=True)
+    category    = db.Column(db.String(50),  nullable=False, default='lab_reagent')
+    unit        = db.Column(db.String(50),  nullable=False, default='unit')
+    pack_size   = db.Column(db.Integer,     nullable=True)
+    unit_price  = db.Column(db.Numeric(14, 2), nullable=True)
+    reorder_level = db.Column(db.Numeric(14, 4), nullable=True)
+    is_active   = db.Column(db.Boolean, default=True)
+    notes       = db.Column(db.Text, nullable=True)
+    created_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    stock_levels  = db.relationship('StockLevel',      back_populates='item', cascade='all, delete-orphan', lazy=True)
+    transactions  = db.relationship('StockTransaction', back_populates='item', lazy=True)
+    test_mappings = db.relationship('TestReagentMap',   back_populates='item', cascade='all, delete-orphan', lazy=True)
+
+    @property
+    def category_label(self):
+        return ITEM_CATEGORY_LABELS.get(self.category, self.category)
+
+    @property
+    def total_stock(self):
+        return sum(float(sl.qty_on_hand) for sl in self.stock_levels)
+
+    @property
+    def is_low_stock(self):
+        if self.reorder_level is None:
+            return False
+        return self.total_stock < float(self.reorder_level)
+
+
+class TestCatalogue(db.Model):
+    __tablename__ = "test_catalogue"
+    id            = db.Column(db.Integer, primary_key=True)
+    name          = db.Column(db.String(300), nullable=False)
+    labsmart_name = db.Column(db.String(300), nullable=False)
+    case_type     = db.Column(db.String(20),  nullable=False, default='lab')
+    is_active     = db.Column(db.Boolean, default=True)
+    created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    reagent_mappings = db.relationship('TestReagentMap', back_populates='test', cascade='all, delete-orphan', lazy=True)
+    package_links    = db.relationship('PackageTest',     back_populates='test', cascade='all, delete-orphan', lazy=True)
+
+    @property
+    def case_type_label(self):
+        return CASE_TYPE_LABELS.get(self.case_type, self.case_type)
+
+
+class TestReagentMap(db.Model):
+    __tablename__ = "test_reagent_maps"
+    id           = db.Column(db.Integer, primary_key=True)
+    test_id      = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='CASCADE'), nullable=False)
+    item_id      = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
+    qty_per_test = db.Column(db.Numeric(10, 4), nullable=False, default=1.0)
+
+    test = db.relationship('TestCatalogue', back_populates='reagent_mappings')
+    item = db.relationship('InventoryItem',  back_populates='test_mappings')
+
+    __table_args__ = (
+        db.UniqueConstraint('test_id', 'item_id', name='uq_test_reagent'),
+    )
+
+
+class PackageCatalogue(db.Model):
+    __tablename__ = "package_catalogue"
+    id            = db.Column(db.Integer, primary_key=True)
+    name          = db.Column(db.String(300), nullable=False)
+    labsmart_name = db.Column(db.String(300), nullable=False)
+    is_active     = db.Column(db.Boolean, default=True)
+    created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    tests = db.relationship('PackageTest', back_populates='package', cascade='all, delete-orphan', lazy=True)
+
+
+class PackageTest(db.Model):
+    __tablename__ = "package_tests"
+    id         = db.Column(db.Integer, primary_key=True)
+    package_id = db.Column(db.Integer, db.ForeignKey('package_catalogue.id', ondelete='CASCADE'), nullable=False)
+    test_id    = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='CASCADE'), nullable=False)
+
+    package = db.relationship('PackageCatalogue', back_populates='tests')
+    test    = db.relationship('TestCatalogue',    back_populates='package_links')
+
+    __table_args__ = (
+        db.UniqueConstraint('package_id', 'test_id', name='uq_package_test'),
+    )
+
+
+class StockLevel(db.Model):
+    __tablename__ = "stock_levels"
+    id           = db.Column(db.Integer, primary_key=True)
+    item_id      = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
+    branch_id    = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    qty_on_hand  = db.Column(db.Numeric(14, 4), nullable=False, default=0)
+    last_updated = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    item   = db.relationship('InventoryItem', back_populates='stock_levels')
+    branch = db.relationship('Branch')
+
+
+class StockTransaction(db.Model):
+    __tablename__ = "stock_transactions"
+    id           = db.Column(db.Integer, primary_key=True)
+    item_id      = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
+    branch_id    = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    txn_type     = db.Column(db.String(20), nullable=False)   # receive|consume|adjust|writeoff
+    qty          = db.Column(db.Numeric(14, 4), nullable=False)  # positive=in, negative=out
+    unit_cost    = db.Column(db.Numeric(14, 2), nullable=True)
+    batch_number = db.Column(db.String(100), nullable=True)
+    expiry_date  = db.Column(db.Date, nullable=True)
+    reference    = db.Column(db.String(100), nullable=True)
+    notes        = db.Column(db.Text, nullable=True)
+    created_by   = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at   = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    item    = db.relationship('InventoryItem', back_populates='transactions')
+    branch  = db.relationship('Branch')
+    creator = db.relationship('User', foreign_keys=[created_by])
+
+
+class LisUpload(db.Model):
+    __tablename__ = "lis_uploads"
+    id             = db.Column(db.Integer, primary_key=True)
+    filename       = db.Column(db.String(255), nullable=False)
+    uploaded_by    = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    record_count   = db.Column(db.Integer, default=0)
+    matched_count  = db.Column(db.Integer, default=0)
+    unmatched_count= db.Column(db.Integer, default=0)
+    status         = db.Column(db.String(20), default='pending_review')  # pending_review|applied
+    start_date     = db.Column(db.Date, nullable=True)
+    end_date       = db.Column(db.Date, nullable=True)
+    created_at     = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    applied_at     = db.Column(db.DateTime, nullable=True)
+
+    uploader  = db.relationship('User', foreign_keys=[uploaded_by])
+    unmatched = db.relationship('UnmatchedInvestigation', back_populates='upload', cascade='all, delete-orphan', lazy=True)
+    rows      = db.relationship('LisUploadRow', back_populates='upload', cascade='all, delete-orphan', lazy=True)
+
+
+class LisUploadRow(db.Model):
+    __tablename__ = "lis_upload_rows"
+    id                 = db.Column(db.Integer, primary_key=True)
+    upload_id          = db.Column(db.Integer, db.ForeignKey('lis_uploads.id', ondelete='CASCADE'), nullable=False)
+    case_id            = db.Column(db.String(50),  nullable=True)
+    case_type          = db.Column(db.String(20),  nullable=True)
+    case_date          = db.Column(db.Date,        nullable=True)
+    investigations_raw = db.Column(db.Text,        nullable=True)
+    branch_raw         = db.Column(db.String(200), nullable=True)
+    branch_id          = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    is_cancelled       = db.Column(db.Boolean, default=False)
+
+    upload = db.relationship('LisUpload', back_populates='rows')
+    branch = db.relationship('Branch')
+
+
+class UnmatchedInvestigation(db.Model):
+    __tablename__ = "unmatched_investigations"
+    id               = db.Column(db.Integer, primary_key=True)
+    upload_id        = db.Column(db.Integer, db.ForeignKey('lis_uploads.id', ondelete='CASCADE'), nullable=False)
+    raw_name         = db.Column(db.String(500), nullable=False)
+    occurrence_count = db.Column(db.Integer, default=1)
+    suggested_test_id= db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='SET NULL'), nullable=True)
+    suggested_score  = db.Column(db.Numeric(5, 4), nullable=True)
+    resolved_test_id = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='SET NULL'), nullable=True)
+    resolved_by      = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    resolved_at      = db.Column(db.DateTime, nullable=True)
+    action           = db.Column(db.String(20), default='pending')  # pending|mapped|skipped
+
+    upload         = db.relationship('LisUpload',    back_populates='unmatched')
+    suggested_test = db.relationship('TestCatalogue', foreign_keys=[suggested_test_id])
+    resolved_test  = db.relationship('TestCatalogue', foreign_keys=[resolved_test_id])
+    resolver       = db.relationship('User',          foreign_keys=[resolved_by])
