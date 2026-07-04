@@ -5,7 +5,7 @@ import csv, io
 from functools import wraps
 
 from flask import (Blueprint, render_template, redirect, url_for, flash,
-                   request, abort, jsonify)
+                   request, abort, jsonify, Response)
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
@@ -842,3 +842,224 @@ def reports():
         branch_id=branch_id,
         date_from=date_from_s, date_to=date_to_s,
     )
+
+
+# ── CSV import / export ───────────────────────────────────────────────────────
+
+def _csv_response(rows, filename):
+    """Build a CSV Flask response from a list-of-lists."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    for row in rows:
+        writer.writerow(row)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@inventory_bp.route("/items/download")
+@login_required
+@_inventory_access
+def download_items_csv():
+    """Export all active inventory items as a CSV (also usable as an upload template)."""
+    items = InventoryItem.query.order_by(InventoryItem.name).all()
+    rows = [["Name", "Item Code", "Category", "Unit", "Pack Size", "Unit Price (N)", "Reorder Level", "Notes"]]
+    for it in items:
+        rows.append([
+            it.name, it.item_code or "", it.category,
+            it.unit, it.pack_size or "", it.unit_price or "", it.reorder_level or "",
+            it.notes or "",
+        ])
+    return _csv_response(rows, "inventory_items.csv")
+
+
+@inventory_bp.route("/items/upload", methods=["POST"])
+@login_required
+@_inventory_access
+def upload_items_csv():
+    """Bulk-import items from CSV. Updates existing (by item_code or exact name), creates new."""
+    f = request.files.get("csv_file")
+    if not f or not f.filename:
+        flash("Please select a CSV file.", "error")
+        return redirect(url_for("inventory.items"))
+
+    try:
+        content = f.read().decode("utf-8-sig", errors="replace")
+    except Exception:
+        flash("Could not read file.", "error")
+        return redirect(url_for("inventory.items"))
+
+    reader = csv.DictReader(io.StringIO(content))
+    # normalise header names (strip whitespace, lowercase)
+    def norm(h): return h.strip().lower().replace(" ", "_").replace("(n)", "").replace("(₦)", "").rstrip("_")
+
+    added = updated = skipped = 0
+    for raw_row in reader:
+        row = {norm(k): (v or "").strip() for k, v in raw_row.items()}
+        name = row.get("name", "").strip()
+        if not name:
+            skipped += 1
+            continue
+
+        code = row.get("item_code", "") or None
+        cat  = row.get("category", "lab_reagent").strip() or "lab_reagent"
+        unit = row.get("unit", "unit").strip() or "unit"
+        pack_s   = row.get("pack_size", "") or ""
+        price_s  = row.get("unit_price", "") or ""
+        reorder_s= row.get("reorder_level", "") or ""
+        notes    = row.get("notes", "") or None
+
+        def to_num(s):
+            import re
+            s = re.sub(r'[^\d.]', '', str(s))
+            try: return float(s) if s else None
+            except: return None
+
+        pack  = int(to_num(pack_s))  if pack_s  and to_num(pack_s)  else None
+        price = to_num(price_s)
+        reorder = to_num(reorder_s)
+
+        # Look for existing by code first, then by exact name
+        existing = None
+        if code:
+            existing = InventoryItem.query.filter_by(item_code=code).first()
+        if not existing:
+            existing = InventoryItem.query.filter(
+                func.lower(InventoryItem.name) == name.lower()
+            ).first()
+
+        if existing:
+            existing.name          = name
+            existing.item_code     = code
+            existing.category      = cat
+            existing.unit          = unit
+            existing.pack_size     = pack
+            existing.unit_price    = price
+            existing.reorder_level = reorder
+            existing.notes         = notes
+            updated += 1
+        else:
+            db.session.add(InventoryItem(
+                name=name, item_code=code, category=cat, unit=unit,
+                pack_size=pack, unit_price=price, reorder_level=reorder, notes=notes,
+            ))
+            added += 1
+
+    try:
+        db.session.commit()
+        flash(f"Items import complete — {added} added, {updated} updated, {skipped} skipped.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Import failed: {e}", "error")
+    return redirect(url_for("inventory.items"))
+
+
+@inventory_bp.route("/receive/template")
+@login_required
+@_stock_manager
+def receive_template():
+    """Download a blank CSV template for bulk stock receipt."""
+    branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+    rows = [
+        ["# Bulk Receive Stock Template — fill in rows below, delete these comment rows before uploading"],
+        [f"# Branches available: {', '.join(b.name for b in branches)} (or leave blank for Central)"],
+        ["Item Name", "Item Code", "Branch", "Qty", "Unit Cost (N)", "Batch Number", "Expiry Date (YYYY-MM-DD)", "Notes"],
+    ]
+    # Pre-fill item names as hints (no qty/cost — user fills those)
+    for it in all_items[:5]:
+        rows.append([it.name, it.item_code or "", "", "", it.unit_price or "", "", "", ""])
+    rows.append(["... add more rows as needed", "", "", "", "", "", "", ""])
+    return _csv_response(rows, "receive_stock_template.csv")
+
+
+@inventory_bp.route("/receive/upload", methods=["POST"])
+@login_required
+@_stock_manager
+def bulk_receive():
+    """Bulk-receive stock from a filled CSV template."""
+    f = request.files.get("csv_file")
+    if not f or not f.filename:
+        flash("Please select a CSV file.", "error")
+        return redirect(url_for("inventory.receive_stock"))
+
+    try:
+        content = f.read().decode("utf-8-sig", errors="replace")
+    except Exception:
+        flash("Could not read file.", "error")
+        return redirect(url_for("inventory.receive_stock"))
+
+    branches  = {b.name.lower(): b.id for b in Branch.query.all()}
+
+    def norm(h): return h.strip().lower().replace(" ", "_").replace("(n)", "").replace("(₦)", "").rstrip("_")
+
+    received_count = 0
+    errors = []
+
+    reader = csv.DictReader(io.StringIO(content))
+    for i, raw_row in enumerate(reader, start=2):
+        row = {norm(k): (v or "").strip() for k, v in raw_row.items()}
+
+        # Skip comment/empty rows
+        name     = row.get("item_name", "").strip()
+        if not name or name.startswith("#") or name.startswith("..."):
+            continue
+
+        code  = row.get("item_code", "") or None
+        qty_s = row.get("qty", "").strip()
+        if not qty_s:
+            errors.append(f"Row {i}: qty missing for '{name}'")
+            continue
+
+        import re
+        def to_num(s):
+            s = re.sub(r'[^\d.]', '', str(s))
+            try: return float(s) if s else None
+            except: return None
+
+        qty = to_num(qty_s)
+        if not qty or qty <= 0:
+            errors.append(f"Row {i}: invalid qty for '{name}'")
+            continue
+
+        # Find item
+        item = None
+        if code:
+            item = InventoryItem.query.filter_by(item_code=code).first()
+        if not item:
+            item = InventoryItem.query.filter(
+                func.lower(InventoryItem.name) == name.lower()
+            ).first()
+        if not item:
+            errors.append(f"Row {i}: item not found — '{name}'")
+            continue
+
+        branch_raw = row.get("branch", "").strip().lower()
+        branch_id  = branches.get(branch_raw) if branch_raw else None
+
+        unit_cost = to_num(row.get("unit_cost", ""))
+        batch     = row.get("batch_number", "") or None
+        expiry    = _parse_date(row.get("expiry_date", ""))
+        notes     = row.get("notes", "") or None
+
+        _apply_txn(item_id=item.id, branch_id=branch_id, txn_type="receive",
+                   qty=qty, user_id=current_user.id,
+                   unit_cost=unit_cost, batch=batch, expiry=expiry, notes=notes)
+        received_count += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Bulk receive failed: {e}", "error")
+        return redirect(url_for("inventory.receive_stock"))
+
+    msg = f"Bulk receive complete — {received_count} line(s) recorded."
+    if errors:
+        msg += f" {len(errors)} row(s) skipped: {'; '.join(errors[:3])}{'…' if len(errors) > 3 else ''}"
+        flash(msg, "warning")
+    else:
+        flash(msg, "success")
+    return redirect(url_for("inventory.dashboard"))
