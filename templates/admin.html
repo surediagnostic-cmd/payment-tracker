@@ -101,6 +101,7 @@
           <label class="label">Role</label>
           <select name="role" class="inp" onchange="toggleAddBranches(this.value)">
             <option value="accountant">Accountant</option>
+            <option value="lab_staff">Lab Staff</option>
             <option value="mds">MDS</option>
           </select>
         </div>
@@ -135,7 +136,7 @@
         <tr>
           <td style="font-weight:600; color:var(--white);">{{ u.name }}</td>
           <td style="color:var(--muted); font-size:12px;">{{ u.email }}</td>
-          <td><span class="badge {% if u.is_mds %}badge-orange{% else %}badge-blue{% endif %}">{{ u.role | upper }}</span></td>
+          <td><span class="badge {% if u.is_mds %}badge-orange{% elif u.is_lab_staff %}badge-green{% else %}badge-blue{% endif %}">{{ u.role | upper | replace('_', ' ') }}</span></td>
           <td style="font-size:12px;">
             {% if u.branches %}
               {% for b in u.branches %}<span class="badge badge-blue" style="font-size:10px; margin-right:3px;">{{ b.name }}</span>{% endfor %}
@@ -178,7 +179,8 @@
                   <div>
                     <label class="label">Role</label>
                     <select name="role" class="inp" onchange="toggleEditBranches(this, {{ u.id }})">
-                      <option value="accountant" {% if not u.is_mds %}selected{% endif %}>Accountant</option>
+                      <option value="accountant" {% if u.role == 'accountant' %}selected{% endif %}>Accountant</option>
+                      <option value="lab_staff" {% if u.role == 'lab_staff' %}selected{% endif %}>Lab Staff</option>
                       <option value="mds" {% if u.is_mds %}selected{% endif %}>MDS</option>
                     </select>
                   </div>
