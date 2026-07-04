@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Inventory Reports{% endblock %}
+{% block page_title %}Inventory — Reports{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">Inventory Reports</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">Consumption, receipts and stock movement summary</div>
+  </div>
+</div>
+
+{# Filters #}
+<form method="get" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:24px;">
+  <div>
+    <label class="label">From</label>
+    <input name="date_from" type="date" class="inp" style="width:160px;" value="{{ date_from }}">
+  </div>
+  <div>
+    <label class="label">To</label>
+    <input name="date_to" type="date" class="inp" style="width:160px;" value="{{ date_to }}">
+  </div>
+  <div>
+    <label class="label">Branch</label>
+    <select name="branch_id" class="inp" style="width:170px;">
+      <option value="">All Branches</option>
+      {% for b in branches %}<option value="{{ b.id }}" {% if branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn-primary">Apply</button>
+  {% if date_from or date_to or branch_id %}
+  <a href="{{ url_for('inventory.reports') }}" class="btn-outline">Clear</a>
+  {% endif %}
+</form>
+
+{% if rows %}
+{# Summary KPIs #}
+{% set total_consumed = rows | sum(attribute='consumed') | default(0, true) %}
+{% set total_received = rows | sum(attribute='received') | default(0, true) %}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:24px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Items Tracked</div>
+    <div class="kpi-value">{{ rows|length }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Consumed</div>
+    <div class="kpi-value" style="color:var(--orange2);">{{ (total_consumed or 0)|round(2) }}</div>
+    <div class="kpi-sub">units across all items</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Received</div>
+    <div class="kpi-value" style="color:var(--green);">{{ (total_received or 0)|round(2) }}</div>
+    <div class="kpi-sub">units across all items</div>
+  </div>
+</div>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr>
+      <th>Item</th><th>Unit</th><th>Received (+)</th><th>Consumed (−)</th><th>Net Movement</th><th>Est. Cost Consumed</th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      {% set consumed = (r.consumed or 0)|float %}
+      {% set received = (r.received or 0)|float %}
+      {% set net      = (r.net_qty or 0)|float %}
+      {% set cost     = consumed * (r.unit_price|float if r.unit_price else 0) %}
+      <tr>
+        <td><a href="{{ url_for('inventory.item_detail', item_id=r.id) }}" style="color:var(--orange2); font-weight:600;">{{ r.name }}</a></td>
+        <td style="color:var(--muted);">{{ r.unit }}</td>
+        <td style="color:var(--green);">+{{ received|round(2) }}</td>
+        <td style="color:var(--red);">−{{ consumed|round(2) }}</td>
+        <td style="color:{{ 'var(--green)' if net >= 0 else 'var(--red)' }}; font-weight:600;">
+          {{ '+' if net >= 0 else '' }}{{ net|round(2) }}
+        </td>
+        <td style="color:var(--muted);">{% if cost > 0 %}₦{{ '{:,.2f}'.format(cost) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+<div class="card" style="padding:60px; text-align:center;">
+  <svg width="40" height="40" fill="none" stroke="var(--muted)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px; display:block;"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+  <div style="color:var(--muted); font-size:14px;">No transactions found for the selected period.</div>
+  {% if not date_from and not date_to %}
+  <div style="color:var(--dim); font-size:13px; margin-top:6px;">Select a date range to view consumption data, or <a href="{{ url_for('inventory.receive_stock') }}" style="color:var(--orange2);">receive stock</a> to get started.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
