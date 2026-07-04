@@ -1,0 +1,844 @@
+"""Inventory Management — reagents, consumables, LIS upload & consumption tracking."""
+from datetime import datetime, timezone, date as date_type
+from difflib import SequenceMatcher
+import csv, io
+from functools import wraps
+
+from flask import (Blueprint, render_template, redirect, url_for, flash,
+                   request, abort, jsonify)
+from flask_login import login_required, current_user
+from sqlalchemy import func
+
+from app import db
+from models import (
+    Branch, User,
+    InventoryItem, TestCatalogue, TestReagentMap,
+    PackageCatalogue, PackageTest,
+    StockLevel, StockTransaction,
+    LisUpload, LisUploadRow, UnmatchedInvestigation,
+    ITEM_CATEGORY_LABELS, CASE_TYPE_LABELS,
+)
+
+inventory_bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+ITEM_CATEGORIES = list(ITEM_CATEGORY_LABELS.items())
+CASE_TYPES      = list(CASE_TYPE_LABELS.items())
+
+AUTO_MATCH_THRESHOLD = 0.82   # score >= this → auto-match
+SUGGEST_THRESHOLD    = 0.50   # score >= this → show as suggestion
+
+
+# ── Access decorators ─────────────────────────────────────────────────────────
+
+def _inventory_access(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.can_view_inventory:
+            flash("Access denied.", "error")
+            return redirect(url_for("requests.dashboard"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _stock_manager(f):
+    """Accountant + lab_staff + mds can receive/adjust stock."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role not in ("accountant", "lab_staff", "mds"):
+            flash("Access denied.", "error")
+            return redirect(url_for("inventory.dashboard"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _upload_access(f):
+    """Only accountant/mds can upload LIS CSV."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role not in ("accountant", "mds"):
+            flash("Accountant access required to upload LIS data.", "error")
+            return redirect(url_for("inventory.dashboard"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _mds_only(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_mds:
+            flash("MDS access required.", "error")
+            return redirect(url_for("inventory.dashboard"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ── Stock helpers ─────────────────────────────────────────────────────────────
+
+def _get_or_create_sl(item_id, branch_id):
+    sl = StockLevel.query.filter_by(item_id=item_id, branch_id=branch_id).first()
+    if not sl:
+        sl = StockLevel(item_id=item_id, branch_id=branch_id, qty_on_hand=0)
+        db.session.add(sl)
+    return sl
+
+
+def _apply_txn(item_id, branch_id, txn_type, qty, user_id,
+               unit_cost=None, batch=None, expiry=None, reference=None, notes=None):
+    txn = StockTransaction(
+        item_id=item_id, branch_id=branch_id, txn_type=txn_type,
+        qty=qty, unit_cost=unit_cost, batch_number=batch,
+        expiry_date=expiry, reference=reference, notes=notes,
+        created_by=user_id,
+    )
+    db.session.add(txn)
+    sl = _get_or_create_sl(item_id, branch_id)
+    sl.qty_on_hand = float(sl.qty_on_hand) + float(qty)
+    sl.last_updated = datetime.now(timezone.utc)
+
+
+# ── Fuzzy / branch matching ───────────────────────────────────────────────────
+
+def _fuzzy_score(a, b):
+    return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+
+def _best_test_match(name, all_tests):
+    """Return (TestCatalogue|None, score) for the best fuzzy match."""
+    best, score = None, 0.0
+    for t in all_tests:
+        s = _fuzzy_score(name, t.labsmart_name)
+        if s > score:
+            score, best = s, t
+    return best, score
+
+
+def _best_package_match(name, all_pkgs):
+    best, score = None, 0.0
+    for p in all_pkgs:
+        s = _fuzzy_score(name, p.labsmart_name)
+        if s > score:
+            score, best = s, p
+    return best, score
+
+
+def _match_branch(raw, branches):
+    if not raw:
+        return None
+    raw_lower = raw.strip().lower()
+    for b in branches:
+        if b.name.lower() in raw_lower:
+            return b.id
+    return None
+
+
+def _parse_date(s):
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(s.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@inventory_bp.route("/")
+@login_required
+@_inventory_access
+def dashboard():
+    total_items    = InventoryItem.query.filter_by(is_active=True).count()
+    pending_uploads = LisUpload.query.filter_by(status='pending_review').count()
+
+    low_stock = (
+        db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
+        .outerjoin(StockLevel, StockLevel.item_id == InventoryItem.id)
+        .filter(InventoryItem.is_active == True, InventoryItem.reorder_level != None)
+        .group_by(InventoryItem.id)
+        .having(func.coalesce(func.sum(StockLevel.qty_on_hand), 0) < InventoryItem.reorder_level)
+        .all()
+    )
+
+    recent_txns = (
+        StockTransaction.query
+        .order_by(StockTransaction.created_at.desc())
+        .limit(12).all()
+    )
+
+    recent_uploads = LisUpload.query.order_by(LisUpload.created_at.desc()).limit(5).all()
+
+    return render_template("inventory/dashboard.html",
+        total_items=total_items,
+        pending_uploads=pending_uploads,
+        low_stock=low_stock,
+        recent_txns=recent_txns,
+        recent_uploads=recent_uploads,
+    )
+
+
+# ── Items catalogue ───────────────────────────────────────────────────────────
+
+@inventory_bp.route("/items")
+@login_required
+@_inventory_access
+def items():
+    cat = request.args.get("cat", "")
+    q   = request.args.get("q", "").strip()
+    query = InventoryItem.query
+    if cat:
+        query = query.filter_by(category=cat)
+    if q:
+        query = query.filter(InventoryItem.name.ilike(f"%{q}%"))
+    items_list = query.order_by(InventoryItem.name).all()
+    return render_template("inventory/items.html",
+        items=items_list, cat_filter=cat, q=q,
+        ITEM_CATEGORIES=ITEM_CATEGORIES,
+    )
+
+
+@inventory_bp.route("/items/add", methods=["POST"])
+@login_required
+@_inventory_access
+def add_item():
+    name   = request.form.get("name", "").strip()
+    code   = request.form.get("item_code", "").strip() or None
+    cat    = request.form.get("category", "lab_reagent")
+    unit   = request.form.get("unit", "unit").strip() or "unit"
+    pack   = request.form.get("pack_size", "").strip()
+    price  = request.form.get("unit_price", "").strip()
+    reorder= request.form.get("reorder_level", "").strip()
+    notes  = request.form.get("notes", "").strip() or None
+
+    if not name:
+        flash("Item name is required.", "error")
+        return redirect(url_for("inventory.items"))
+
+    item = InventoryItem(
+        name=name, item_code=code, category=cat, unit=unit,
+        pack_size=int(pack) if pack else None,
+        unit_price=float(price) if price else None,
+        reorder_level=float(reorder) if reorder else None,
+        notes=notes,
+    )
+    db.session.add(item)
+    db.session.commit()
+    flash(f"Item '{name}' added.", "success")
+    return redirect(url_for("inventory.item_detail", item_id=item.id))
+
+
+@inventory_bp.route("/items/<int:item_id>")
+@login_required
+@_inventory_access
+def item_detail(item_id):
+    item = InventoryItem.query.get_or_404(item_id)
+    stock_levels = StockLevel.query.filter_by(item_id=item_id).all()
+    txns = (StockTransaction.query
+            .filter_by(item_id=item_id)
+            .order_by(StockTransaction.created_at.desc())
+            .limit(30).all())
+    branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
+    return render_template("inventory/item_detail.html",
+        item=item, stock_levels=stock_levels, txns=txns,
+        branches=branches, all_tests=all_tests,
+        ITEM_CATEGORIES=ITEM_CATEGORIES,
+    )
+
+
+@inventory_bp.route("/items/<int:item_id>/edit", methods=["POST"])
+@login_required
+@_inventory_access
+def edit_item(item_id):
+    item = InventoryItem.query.get_or_404(item_id)
+    item.name     = request.form.get("name", item.name).strip()
+    item.item_code= request.form.get("item_code", "").strip() or None
+    item.category = request.form.get("category", item.category)
+    item.unit     = request.form.get("unit", item.unit).strip() or item.unit
+    pack  = request.form.get("pack_size", "").strip()
+    price = request.form.get("unit_price", "").strip()
+    reorder= request.form.get("reorder_level", "").strip()
+    item.pack_size    = int(pack) if pack else None
+    item.unit_price   = float(price) if price else None
+    item.reorder_level= float(reorder) if reorder else None
+    item.notes        = request.form.get("notes", "").strip() or None
+    db.session.commit()
+    flash(f"Item '{item.name}' updated.", "success")
+    return redirect(url_for("inventory.item_detail", item_id=item_id))
+
+
+@inventory_bp.route("/items/<int:item_id>/toggle", methods=["POST"])
+@login_required
+@_mds_only
+def toggle_item(item_id):
+    item = InventoryItem.query.get_or_404(item_id)
+    item.is_active = not item.is_active
+    db.session.commit()
+    flash(f"Item '{item.name}' {'activated' if item.is_active else 'deactivated'}.", "success")
+    return redirect(url_for("inventory.item_detail", item_id=item_id))
+
+
+# ── Test catalogue ────────────────────────────────────────────────────────────
+
+@inventory_bp.route("/tests")
+@login_required
+@_inventory_access
+def tests():
+    type_filter = request.args.get("type", "")
+    q           = request.args.get("q", "").strip()
+    query = TestCatalogue.query
+    if type_filter:
+        query = query.filter_by(case_type=type_filter)
+    if q:
+        query = query.filter(
+            TestCatalogue.name.ilike(f"%{q}%") |
+            TestCatalogue.labsmart_name.ilike(f"%{q}%")
+        )
+    tests_list = query.order_by(TestCatalogue.name).all()
+    return render_template("inventory/tests.html",
+        tests=tests_list, type_filter=type_filter, q=q,
+        CASE_TYPES=CASE_TYPES,
+    )
+
+
+@inventory_bp.route("/tests/add", methods=["POST"])
+@login_required
+@_inventory_access
+def add_test():
+    name      = request.form.get("name", "").strip()
+    lis_name  = request.form.get("labsmart_name", "").strip()
+    case_type = request.form.get("case_type", "lab")
+    if not name or not lis_name:
+        flash("Test name and LIS name are required.", "error")
+        return redirect(url_for("inventory.tests"))
+    t = TestCatalogue(name=name, labsmart_name=lis_name, case_type=case_type)
+    db.session.add(t)
+    db.session.commit()
+    flash(f"Test '{name}' added.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=t.id))
+
+
+@inventory_bp.route("/tests/<int:test_id>")
+@login_required
+@_inventory_access
+def test_detail(test_id):
+    test      = TestCatalogue.query.get_or_404(test_id)
+    all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+    return render_template("inventory/test_detail.html",
+        test=test, all_items=all_items, CASE_TYPES=CASE_TYPES,
+    )
+
+
+@inventory_bp.route("/tests/<int:test_id>/edit", methods=["POST"])
+@login_required
+@_inventory_access
+def edit_test(test_id):
+    test = TestCatalogue.query.get_or_404(test_id)
+    test.name          = request.form.get("name", test.name).strip()
+    test.labsmart_name = request.form.get("labsmart_name", test.labsmart_name).strip()
+    test.case_type     = request.form.get("case_type", test.case_type)
+    db.session.commit()
+    flash(f"Test '{test.name}' updated.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/<int:test_id>/mappings/add", methods=["POST"])
+@login_required
+@_inventory_access
+def add_test_mapping(test_id):
+    test    = TestCatalogue.query.get_or_404(test_id)
+    item_id = request.form.get("item_id", type=int)
+    qty     = request.form.get("qty_per_test", "1").strip()
+    if not item_id:
+        flash("Select an inventory item.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+    existing = TestReagentMap.query.filter_by(test_id=test_id, item_id=item_id).first()
+    if existing:
+        existing.qty_per_test = float(qty) if qty else 1.0
+    else:
+        db.session.add(TestReagentMap(test_id=test_id, item_id=item_id,
+                                      qty_per_test=float(qty) if qty else 1.0))
+    db.session.commit()
+    flash("Mapping saved.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/<int:test_id>/mappings/<int:map_id>/delete", methods=["POST"])
+@login_required
+@_inventory_access
+def delete_test_mapping(test_id, map_id):
+    m = TestReagentMap.query.get_or_404(map_id)
+    db.session.delete(m)
+    db.session.commit()
+    flash("Mapping removed.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+# ── Packages catalogue ────────────────────────────────────────────────────────
+
+@inventory_bp.route("/packages")
+@login_required
+@_inventory_access
+def packages():
+    pkgs = PackageCatalogue.query.order_by(PackageCatalogue.name).all()
+    return render_template("inventory/packages.html", packages=pkgs)
+
+
+@inventory_bp.route("/packages/add", methods=["POST"])
+@login_required
+@_inventory_access
+def add_package():
+    name     = request.form.get("name", "").strip()
+    lis_name = request.form.get("labsmart_name", "").strip()
+    if not name or not lis_name:
+        flash("Package name and LIS name are required.", "error")
+        return redirect(url_for("inventory.packages"))
+    p = PackageCatalogue(name=name, labsmart_name=lis_name)
+    db.session.add(p)
+    db.session.commit()
+    flash(f"Package '{name}' added.", "success")
+    return redirect(url_for("inventory.package_detail", pkg_id=p.id))
+
+
+@inventory_bp.route("/packages/<int:pkg_id>")
+@login_required
+@_inventory_access
+def package_detail(pkg_id):
+    pkg       = PackageCatalogue.query.get_or_404(pkg_id)
+    all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
+    linked_ids= {pt.test_id for pt in pkg.tests}
+    return render_template("inventory/package_detail.html",
+        package=pkg, all_tests=all_tests, linked_ids=linked_ids,
+    )
+
+
+@inventory_bp.route("/packages/<int:pkg_id>/edit", methods=["POST"])
+@login_required
+@_inventory_access
+def edit_package(pkg_id):
+    pkg = PackageCatalogue.query.get_or_404(pkg_id)
+    pkg.name          = request.form.get("name", pkg.name).strip()
+    pkg.labsmart_name = request.form.get("labsmart_name", pkg.labsmart_name).strip()
+    db.session.commit()
+    flash("Package updated.", "success")
+    return redirect(url_for("inventory.package_detail", pkg_id=pkg_id))
+
+
+@inventory_bp.route("/packages/<int:pkg_id>/tests", methods=["POST"])
+@login_required
+@_inventory_access
+def update_package_tests(pkg_id):
+    pkg = PackageCatalogue.query.get_or_404(pkg_id)
+    test_ids = set(request.form.getlist("test_ids[]", type=int))
+    existing_ids = {pt.test_id for pt in pkg.tests}
+    # add new
+    for tid in test_ids - existing_ids:
+        db.session.add(PackageTest(package_id=pkg_id, test_id=tid))
+    # remove unselected
+    for pt in pkg.tests:
+        if pt.test_id not in test_ids:
+            db.session.delete(pt)
+    db.session.commit()
+    flash("Package tests updated.", "success")
+    return redirect(url_for("inventory.package_detail", pkg_id=pkg_id))
+
+
+# ── Receive stock ─────────────────────────────────────────────────────────────
+
+@inventory_bp.route("/receive", methods=["GET", "POST"])
+@login_required
+@_stock_manager
+def receive_stock():
+    branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+
+    if request.method == "POST":
+        item_id  = request.form.get("item_id", type=int)
+        branch_id= request.form.get("branch_id", type=int) or None
+        qty      = request.form.get("qty", "").strip()
+        unit_cost= request.form.get("unit_cost", "").strip()
+        batch    = request.form.get("batch_number", "").strip() or None
+        expiry_s = request.form.get("expiry_date", "").strip()
+        notes    = request.form.get("notes", "").strip() or None
+
+        if not item_id or not qty:
+            flash("Item and quantity are required.", "error")
+            return redirect(url_for("inventory.receive_stock"))
+
+        expiry = _parse_date(expiry_s)
+        _apply_txn(
+            item_id=item_id, branch_id=branch_id,
+            txn_type="receive", qty=float(qty),
+            user_id=current_user.id,
+            unit_cost=float(unit_cost) if unit_cost else None,
+            batch=batch, expiry=expiry, notes=notes,
+        )
+        db.session.commit()
+        item = InventoryItem.query.get(item_id)
+        flash(f"Received {qty} {item.unit}(s) of '{item.name}'.", "success")
+        return redirect(url_for("inventory.dashboard"))
+
+    return render_template("inventory/receive.html",
+        branches=branches, all_items=all_items,
+    )
+
+
+# ── Adjust / write-off ────────────────────────────────────────────────────────
+
+@inventory_bp.route("/adjust", methods=["GET", "POST"])
+@login_required
+@_stock_manager
+def adjust_stock():
+    branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+
+    if request.method == "POST":
+        item_id  = request.form.get("item_id", type=int)
+        branch_id= request.form.get("branch_id", type=int) or None
+        txn_type = request.form.get("txn_type", "adjust")
+        qty_raw  = request.form.get("qty", "").strip()
+        direction= request.form.get("direction", "out")  # in | out
+        notes    = request.form.get("notes", "").strip() or None
+
+        if not item_id or not qty_raw:
+            flash("Item and quantity are required.", "error")
+            return redirect(url_for("inventory.adjust_stock"))
+
+        qty = float(qty_raw)
+        if direction == "out":
+            qty = -abs(qty)
+        else:
+            qty = abs(qty)
+
+        _apply_txn(item_id=item_id, branch_id=branch_id, txn_type=txn_type,
+                   qty=qty, user_id=current_user.id, notes=notes)
+        db.session.commit()
+        item = InventoryItem.query.get(item_id)
+        flash(f"Adjustment recorded for '{item.name}'.", "success")
+        return redirect(url_for("inventory.dashboard"))
+
+    return render_template("inventory/adjust.html",
+        branches=branches, all_items=all_items,
+    )
+
+
+# ── LIS Uploads ───────────────────────────────────────────────────────────────
+
+@inventory_bp.route("/uploads")
+@login_required
+@_upload_access
+def uploads():
+    uploads_list = LisUpload.query.order_by(LisUpload.created_at.desc()).limit(50).all()
+    return render_template("inventory/uploads.html", uploads=uploads_list)
+
+
+@inventory_bp.route("/uploads/new", methods=["POST"])
+@login_required
+@_upload_access
+def upload_lis():
+    f = request.files.get("csv_file")
+    if not f or not f.filename:
+        flash("Please select a CSV file.", "error")
+        return redirect(url_for("inventory.uploads"))
+
+    try:
+        content = f.read().decode("utf-8-sig", errors="replace")
+    except Exception:
+        flash("Could not read file. Ensure it is a UTF-8 CSV.", "error")
+        return redirect(url_for("inventory.uploads"))
+
+    reader = csv.DictReader(io.StringIO(content))
+    fieldnames = [fn.strip() for fn in (reader.fieldnames or [])]
+
+    required = {"Investigations", "Case Type", "Date", "Collection centre", "Canceled"}
+    missing  = required - set(fieldnames)
+    if missing:
+        flash(f"CSV missing expected columns: {', '.join(missing)}", "error")
+        return redirect(url_for("inventory.uploads"))
+
+    branches  = Branch.query.all()
+    all_tests = TestCatalogue.query.filter_by(is_active=True).all()
+    all_pkgs  = PackageCatalogue.query.filter_by(is_active=True).all()
+
+    upload = LisUpload(filename=f.filename, uploaded_by=current_user.id)
+    db.session.add(upload)
+    db.session.flush()  # get upload.id
+
+    row_count  = 0
+    dates      = []
+    # unique investigation names that need resolution: {raw_name: count}
+    inv_counts = {}
+
+    for raw_row in reader:
+        # normalise header names (strip whitespace)
+        row = {k.strip(): (v or "").strip() for k, v in raw_row.items()}
+        investigations = row.get("Investigations", "")
+        if not investigations:
+            continue
+
+        cancelled = row.get("Canceled", "false").lower() in ("true", "1", "yes")
+        raw_date  = row.get("Date", "")
+        branch_raw= row.get("Collection centre", "")
+        case_type = row.get("Case Type", "Lab").strip()
+
+        parsed_date = _parse_date(raw_date)
+        if parsed_date:
+            dates.append(parsed_date)
+
+        branch_id = _match_branch(branch_raw, branches)
+
+        lr = LisUploadRow(
+            upload_id=upload.id,
+            case_id=row.get("Case Id", ""),
+            case_type=case_type,
+            case_date=parsed_date,
+            investigations_raw=investigations,
+            branch_raw=branch_raw,
+            branch_id=branch_id,
+            is_cancelled=cancelled,
+        )
+        db.session.add(lr)
+        row_count += 1
+
+        if not cancelled:
+            for inv in investigations.split(","):
+                inv = inv.strip()
+                if inv:
+                    inv_counts[inv] = inv_counts.get(inv, 0) + 1
+
+    # ── Fuzzy-match each unique investigation name ────────────────────────────
+    # Build quick-lookup dicts
+    test_exact  = {t.labsmart_name.strip().lower(): t for t in all_tests}
+    pkg_exact   = {p.labsmart_name.strip().lower(): p for p in all_pkgs}
+
+    matched_names   = set()
+    unmatched_names = {}  # raw_name: (count, suggested_test, score)
+
+    for raw_name, count in inv_counts.items():
+        key = raw_name.strip().lower()
+        if key in test_exact or key in pkg_exact:
+            matched_names.add(raw_name)
+            continue
+
+        # fuzzy match against tests
+        best_test, t_score = _best_test_match(raw_name, all_tests)
+        # fuzzy match against packages
+        best_pkg,  p_score = _best_package_match(raw_name, all_pkgs)
+
+        if t_score >= AUTO_MATCH_THRESHOLD:
+            matched_names.add(raw_name)
+            continue
+        if p_score >= AUTO_MATCH_THRESHOLD:
+            matched_names.add(raw_name)
+            continue
+
+        # needs human review
+        suggested = best_test if t_score >= p_score else None
+        score     = t_score   if t_score >= p_score else p_score
+        unmatched_names[raw_name] = (count, suggested, score)
+
+    for raw_name, (count, suggested, score) in unmatched_names.items():
+        ui = UnmatchedInvestigation(
+            upload_id=upload.id,
+            raw_name=raw_name,
+            occurrence_count=count,
+            suggested_test_id=suggested.id if (suggested and score >= SUGGEST_THRESHOLD) else None,
+            suggested_score=round(score, 4) if score >= SUGGEST_THRESHOLD else None,
+        )
+        db.session.add(ui)
+
+    upload.record_count    = row_count
+    upload.matched_count   = len(matched_names)
+    upload.unmatched_count = len(unmatched_names)
+    upload.start_date      = min(dates) if dates else None
+    upload.end_date        = max(dates) if dates else None
+
+    db.session.commit()
+
+    if upload.unmatched_count == 0:
+        flash(f"Upload complete — {row_count} cases, all investigations matched. Ready to apply.", "success")
+    else:
+        flash(
+            f"Upload complete — {row_count} cases, {upload.unmatched_count} unmatched investigation(s) need review.",
+            "warning",
+        )
+    return redirect(url_for("inventory.upload_review", upload_id=upload.id))
+
+
+@inventory_bp.route("/uploads/<int:upload_id>")
+@login_required
+@_upload_access
+def upload_review(upload_id):
+    upload    = LisUpload.query.get_or_404(upload_id)
+    all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
+    pending   = [u for u in upload.unmatched if u.action == "pending"]
+    return render_template("inventory/upload_review.html",
+        upload=upload, all_tests=all_tests, pending=pending,
+    )
+
+
+@inventory_bp.route("/uploads/<int:upload_id>/resolve", methods=["POST"])
+@login_required
+@_upload_access
+def resolve_unmatched(upload_id):
+    upload = LisUpload.query.get_or_404(upload_id)
+    if upload.status == "applied":
+        flash("This upload has already been applied.", "error")
+        return redirect(url_for("inventory.upload_review", upload_id=upload_id))
+
+    for ui in upload.unmatched:
+        action   = request.form.get(f"action_{ui.id}", "pending")
+        test_id  = request.form.get(f"test_id_{ui.id}", type=int)
+        if action == "mapped" and test_id:
+            ui.action           = "mapped"
+            ui.resolved_test_id = test_id
+            ui.resolved_by      = current_user.id
+            ui.resolved_at      = datetime.now(timezone.utc)
+        elif action == "skipped":
+            ui.action = "skipped"
+            ui.resolved_by = current_user.id
+            ui.resolved_at = datetime.now(timezone.utc)
+
+    db.session.commit()
+    flash("Resolutions saved.", "success")
+    return redirect(url_for("inventory.upload_review", upload_id=upload_id))
+
+
+@inventory_bp.route("/uploads/<int:upload_id>/apply", methods=["POST"])
+@login_required
+@_upload_access
+def apply_upload(upload_id):
+    upload = LisUpload.query.get_or_404(upload_id)
+    if upload.status == "applied":
+        flash("Already applied.", "error")
+        return redirect(url_for("inventory.upload_review", upload_id=upload_id))
+
+    pending = [u for u in upload.unmatched if u.action == "pending"]
+    if pending:
+        flash(f"{len(pending)} unmatched investigation(s) still need resolution before applying.", "warning")
+        return redirect(url_for("inventory.upload_review", upload_id=upload_id))
+
+    all_tests  = TestCatalogue.query.filter_by(is_active=True).all()
+    all_pkgs   = PackageCatalogue.query.filter_by(is_active=True).all()
+
+    test_exact = {t.labsmart_name.strip().lower(): t for t in all_tests}
+    pkg_exact  = {p.labsmart_name.strip().lower(): p for p in all_pkgs}
+
+    # Resolution map from user-reviewed unmatched items
+    resolution_map = {}
+    for ui in upload.unmatched:
+        if ui.action == "mapped" and ui.resolved_test_id:
+            resolution_map[ui.raw_name.strip().lower()] = ui.resolved_test_id
+
+    # Accumulate consumption: {(item_id, branch_id): total_qty}
+    consumption = {}
+
+    for row in upload.rows:
+        if row.is_cancelled or not row.investigations_raw:
+            continue
+        branch_id = row.branch_id  # may be None (central)
+
+        for inv in row.investigations_raw.split(","):
+            inv = inv.strip()
+            if not inv:
+                continue
+            key = inv.lower()
+
+            # 1. Exact test match
+            test = test_exact.get(key)
+            if test:
+                _accumulate(consumption, test, branch_id)
+                continue
+
+            # 2. Exact package match → expand to constituent tests
+            pkg = pkg_exact.get(key)
+            if pkg:
+                for pt in pkg.tests:
+                    _accumulate(consumption, pt.test, branch_id)
+                continue
+
+            # 3. Fuzzy auto-match (re-check threshold)
+            best_t, t_score = _best_test_match(inv, all_tests)
+            best_p, p_score = _best_package_match(inv, all_pkgs)
+            if t_score >= AUTO_MATCH_THRESHOLD:
+                _accumulate(consumption, best_t, branch_id)
+                continue
+            if p_score >= AUTO_MATCH_THRESHOLD:
+                for pt in best_p.tests:
+                    _accumulate(consumption, pt.test, branch_id)
+                continue
+
+            # 4. Resolved by user
+            resolved_test_id = resolution_map.get(key)
+            if resolved_test_id:
+                t = TestCatalogue.query.get(resolved_test_id)
+                if t:
+                    _accumulate(consumption, t, branch_id)
+
+    # Write transactions
+    ref = f"LIS-{upload.id}"
+    for (item_id, branch_id), qty in consumption.items():
+        _apply_txn(item_id=item_id, branch_id=branch_id, txn_type="consume",
+                   qty=-abs(qty), user_id=current_user.id, reference=ref)
+
+    upload.status     = "applied"
+    upload.applied_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    flash(f"Upload applied — {len(consumption)} stock depletion(s) recorded.", "success")
+    return redirect(url_for("inventory.uploads"))
+
+
+def _accumulate(consumption, test, branch_id):
+    """Add reagent consumption for one test to the accumulator dict."""
+    for m in test.reagent_mappings:
+        k = (m.item_id, branch_id)
+        consumption[k] = consumption.get(k, 0) + float(m.qty_per_test)
+
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+
+@inventory_bp.route("/reports")
+@login_required
+@_inventory_access
+def reports():
+    from sqlalchemy import and_
+    date_from_s = request.args.get("date_from", "")
+    date_to_s   = request.args.get("date_to", "")
+    branch_id   = request.args.get("branch_id", type=int)
+    branches    = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+
+    date_from = _parse_date(date_from_s)
+    date_to   = _parse_date(date_to_s)
+
+    q = (
+        db.session.query(
+            InventoryItem.id,
+            InventoryItem.name,
+            InventoryItem.unit,
+            InventoryItem.unit_price,
+            func.sum(StockTransaction.qty).label("net_qty"),
+            func.sum(func.abs(StockTransaction.qty)).filter(StockTransaction.qty < 0).label("consumed"),
+            func.sum(StockTransaction.qty).filter(StockTransaction.qty > 0).label("received"),
+        )
+        .join(StockTransaction, StockTransaction.item_id == InventoryItem.id)
+        .filter(StockTransaction.txn_type.in_(["receive", "consume", "adjust", "writeoff"]))
+    )
+
+    if date_from:
+        q = q.filter(StockTransaction.created_at >= datetime(date_from.year, date_from.month, date_from.day))
+    if date_to:
+        dt_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        q = q.filter(StockTransaction.created_at <= dt_end)
+    if branch_id:
+        q = q.filter(StockTransaction.branch_id == branch_id)
+
+    rows = q.group_by(InventoryItem.id, InventoryItem.name, InventoryItem.unit, InventoryItem.unit_price)\
+            .order_by(func.sum(func.abs(StockTransaction.qty)).filter(StockTransaction.qty < 0).desc().nullslast())\
+            .all()
+
+    return render_template("inventory/reports.html",
+        rows=rows, branches=branches,
+        branch_id=branch_id,
+        date_from=date_from_s, date_to=date_to_s,
+    )
