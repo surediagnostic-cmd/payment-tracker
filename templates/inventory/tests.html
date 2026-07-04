@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Test Catalogue{% endblock %}
+{% block page_title %}Inventory — Test Catalogue{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">Test Catalogue</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">All investigations — map reagents consumed per test</div>
+  </div>
+  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Add Test
+  </button>
+</div>
+
+<form method="get" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+  <input name="q" value="{{ q }}" placeholder="Search tests…" class="inp" style="width:220px;">
+  <div class="filter-drop-wrap">
+    <svg class="filter-drop-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+    <select name="type" class="filter-drop" onchange="this.form.submit()">
+      <option value="">All Types</option>
+      {% for val, label in CASE_TYPES %}
+      <option value="{{ val }}" {% if type_filter == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn-outline">Filter</button>
+  {% if type_filter or q %}<a href="{{ url_for('inventory.tests') }}" class="btn-outline">Clear</a>{% endif %}
+</form>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr>
+      <th>Test Name</th><th>LIS Name</th><th>Case Type</th><th>Reagents Mapped</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+      {% for test in tests %}
+      <tr>
+        <td><a href="{{ url_for('inventory.test_detail', test_id=test.id) }}" style="color:var(--orange2); font-weight:600;">{{ test.name }}</a></td>
+        <td style="color:var(--muted); font-size:12px;">{{ test.labsmart_name }}</td>
+        <td><span class="badge badge-blue">{{ test.case_type_label }}</span></td>
+        <td>
+          {% set n = test.reagent_mappings|length %}
+          {% if n > 0 %}<span class="badge badge-green">{{ n }} item{{ 's' if n != 1 }}</span>
+          {% else %}<span class="badge badge-gray">None mapped</span>{% endif %}
+        </td>
+        <td>{% if test.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:40px;">No tests found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Add Test Modal #}
+<div id="addModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Add Test</div>
+      <button onclick="document.getElementById('addModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.add_test') }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label class="label">Display Name *</label>
+          <input name="name" class="inp" required placeholder="e.g. Full Blood Count">
+        </div>
+        <div>
+          <label class="label">LIS Name (as it appears in LabSmartLIS CSV) *</label>
+          <input name="labsmart_name" class="inp" required placeholder="e.g. FBC (TOTAL BLOOD COUNT)">
+        </div>
+        <div>
+          <label class="label">Case Type *</label>
+          <select name="case_type" class="inp">
+            {% for val, label in CASE_TYPES %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Add Test</button>
+        <button type="button" onclick="document.getElementById('addModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
