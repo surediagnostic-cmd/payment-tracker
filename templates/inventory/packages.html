@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Packages{% endblock %}
+{% block page_title %}Inventory — Packages & Profiles{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">Packages &amp; Profiles</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">Health packages that expand into constituent tests for reagent tracking</div>
+  </div>
+  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Add Package
+  </button>
+</div>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr>
+      <th>Package Name</th><th>LIS Name</th><th>Tests Included</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+      {% for pkg in packages %}
+      <tr>
+        <td><a href="{{ url_for('inventory.package_detail', pkg_id=pkg.id) }}" style="color:var(--orange2); font-weight:600;">{{ pkg.name }}</a></td>
+        <td style="color:var(--muted); font-size:12px;">{{ pkg.labsmart_name }}</td>
+        <td>
+          {% set n = pkg.tests|length %}
+          {% if n > 0 %}
+            <span class="badge badge-blue">{{ n }} test{{ 's' if n != 1 }}</span>
+            <span style="color:var(--dim); font-size:11px; margin-left:6px;">
+              {{ pkg.tests[:3]|map(attribute='test')|map(attribute='name')|join(', ') }}{% if n > 3 %} +{{ n-3 }} more{% endif %}
+            </span>
+          {% else %}
+            <span class="badge badge-gray">No tests linked</span>
+          {% endif %}
+        </td>
+        <td>{% if pkg.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center; color:var(--muted); padding:40px;">
+        No packages yet. Add packages to enable automatic expansion of LIS package names into constituent tests.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Add Package Modal #}
+<div id="addModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Add Package</div>
+      <button onclick="document.getElementById('addModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.add_package') }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label class="label">Package Name *</label>
+          <input name="name" class="inp" required placeholder="e.g. Sure Kidney Health Package">
+        </div>
+        <div>
+          <label class="label">LIS Name (as it appears in CSV) *</label>
+          <input name="labsmart_name" class="inp" required placeholder="e.g. SURE KIDNEY HEALTH PACKAGE">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Add Package</button>
+        <button type="button" onclick="document.getElementById('addModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
