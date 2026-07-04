@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Review Upload{% endblock %}
+{% block page_title %}Inventory — Review Upload{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
+  <a href="{{ url_for('inventory.uploads') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Uploads</a>
+  <span style="color:var(--dim);">/</span>
+  <span style="color:var(--white); font-size:13px;">{{ upload.filename }}</span>
+</div>
+
+{# Summary bar #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Cases</div>
+    <div class="kpi-value">{{ upload.record_count }}</div>
+    <div class="kpi-sub">{% if upload.start_date %}{{ upload.start_date.strftime('%d %b') }} – {{ upload.end_date.strftime('%d %b %Y') if upload.end_date else '' }}{% endif %}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Matched</div>
+    <div class="kpi-value" style="color:var(--green);">{{ upload.matched_count }}</div>
+    <div class="kpi-sub">Auto-resolved investigations</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Unmatched</div>
+    <div class="kpi-value" style="color:{{ 'var(--red)' if upload.unmatched_count else 'var(--green)' }};">{{ upload.unmatched_count }}</div>
+    <div class="kpi-sub">Need review</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Status</div>
+    <div class="kpi-value" style="font-size:18px;">
+      {% if upload.status == 'applied' %}
+        <span style="color:var(--green);">Applied</span>
+      {% else %}
+        <span style="color:var(--amber);">Pending</span>
+      {% endif %}
+    </div>
+    <div class="kpi-sub">{% if upload.applied_at %}{{ upload.applied_at.strftime('%d %b %Y %H:%M') }}{% else %}Not yet applied{% endif %}</div>
+  </div>
+</div>
+
+{% if upload.status == 'applied' %}
+<div class="flash-success" style="border-radius:10px; padding:14px 18px; margin-bottom:20px; font-size:13px;">
+  This upload has been applied. Inventory was depleted on {{ upload.applied_at.strftime('%d %b %Y at %H:%M') }}.
+</div>
+{% endif %}
+
+{# Unmatched investigations #}
+{% if upload.unmatched %}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:6px;">Unmatched Investigations</div>
+  <div style="color:var(--muted); font-size:13px; margin-bottom:16px;">
+    For each unmatched name, map it to the correct test in your catalogue or mark it as skip (e.g. radiology investigations without reagent consumption).
+  </div>
+
+  {% if upload.status != 'applied' %}
+  <form method="post" action="{{ url_for('inventory.resolve_unmatched', upload_id=upload.id) }}">
+    <table style="margin-bottom:16px;">
+      <thead><tr>
+        <th>Investigation Name (from CSV)</th><th>Occurrences</th><th>Suggestion</th><th>Action</th><th>Map to Test</th>
+      </tr></thead>
+      <tbody>
+        {% for ui in upload.unmatched %}
+        <tr style="{% if ui.action == 'mapped' %}background:rgba(34,197,94,.05);{% elif ui.action == 'skipped' %}background:rgba(122,156,196,.05);{% endif %}">
+          <td style="font-weight:600; color:var(--white);">{{ ui.raw_name }}</td>
+          <td style="color:var(--muted);">{{ ui.occurrence_count }}×</td>
+          <td style="font-size:12px;">
+            {% if ui.suggested_test %}
+              <span style="color:var(--orange2);">{{ ui.suggested_test.name }}</span>
+              <span style="color:var(--dim);">({{ (ui.suggested_score|float * 100)|int }}%)</span>
+            {% else %}
+              <span style="color:var(--dim);">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <select name="action_{{ ui.id }}" class="inp" style="width:130px; padding:6px 10px; font-size:12px;"
+              onchange="toggleTestSelect(this, {{ ui.id }})">
+              <option value="pending" {% if ui.action == 'pending' %}selected{% endif %}>Pending</option>
+              <option value="mapped"  {% if ui.action == 'mapped'  %}selected{% endif %}>Map to test</option>
+              <option value="skipped" {% if ui.action == 'skipped' %}selected{% endif %}>Skip</option>
+            </select>
+          </td>
+          <td>
+            <select name="test_id_{{ ui.id }}" id="testSel_{{ ui.id }}" class="inp"
+              style="width:220px; padding:6px 10px; font-size:12px; {% if ui.action != 'mapped' %}opacity:.4; pointer-events:none;{% endif %}">
+              <option value="">— select test —</option>
+              {% for t in all_tests %}
+              <option value="{{ t.id }}"
+                {% if ui.resolved_test_id == t.id or (not ui.resolved_test_id and ui.suggested_test_id == t.id and ui.action == 'mapped') %}selected{% endif %}>
+                {{ t.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn-outline">Save Resolutions</button>
+  </form>
+  {% else %}
+  <table>
+    <thead><tr><th>Investigation Name</th><th>Occurrences</th><th>Resolution</th></tr></thead>
+    <tbody>
+      {% for ui in upload.unmatched %}
+      <tr>
+        <td>{{ ui.raw_name }}</td>
+        <td style="color:var(--muted);">{{ ui.occurrence_count }}×</td>
+        <td>
+          {% if ui.action == 'mapped' %}<span class="badge badge-green">→ {{ ui.resolved_test.name if ui.resolved_test else '?' }}</span>
+          {% elif ui.action == 'skipped' %}<span class="badge badge-gray">Skipped</span>
+          {% else %}<span class="badge badge-yellow">Pending</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% else %}
+<div class="flash-success" style="border-radius:10px; padding:14px 18px; margin-bottom:20px; font-size:13px;">
+  All investigations matched successfully — no manual review needed.
+</div>
+{% endif %}
+
+{# Apply button #}
+{% if upload.status != 'applied' %}
+<div class="card" style="padding:20px; border-color:var(--orange); background:rgba(245,130,31,.05);">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:8px;">Apply Upload</div>
+  <div style="color:var(--muted); font-size:13px; margin-bottom:14px;">
+    Once all unmatched items are resolved, applying will deplete inventory stock based on reagent mappings.
+    {% if pending %}
+    <strong style="color:var(--amber);">{{ pending|length }} item(s) still pending resolution.</strong>
+    {% endif %}
+  </div>
+  <form method="post" action="{{ url_for('inventory.apply_upload', upload_id=upload.id) }}"
+    onsubmit="return confirm('Apply this upload? This will deplete inventory and cannot be undone.')">
+    <button type="submit" class="btn-primary" {% if pending %}disabled style="opacity:.5; cursor:not-allowed;"{% endif %}>
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      Apply to Inventory
+    </button>
+  </form>
+</div>
+{% endif %}
+
+<script>
+function toggleTestSelect(sel, id) {
+  const testSel = document.getElementById('testSel_' + id);
+  if (sel.value === 'mapped') {
+    testSel.style.opacity = '1';
+    testSel.style.pointerEvents = 'auto';
+  } else {
+    testSel.style.opacity = '.4';
+    testSel.style.pointerEvents = 'none';
+  }
+}
+</script>
+{% endblock %}
