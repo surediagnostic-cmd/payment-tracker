@@ -7,10 +7,20 @@
     <h1 class="section-title">Items Catalogue</h1>
     <div style="color:var(--muted); font-size:13px; margin-top:4px;">Reagents, consumables and other inventory items</div>
   </div>
-  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
-    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-    Add Item
-  </button>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a href="{{ url_for('inventory.download_items_csv') }}" class="btn-outline" style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export CSV
+    </a>
+    <button onclick="document.getElementById('uploadModal').style.display='flex'" class="btn-outline" style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Import CSV
+    </button>
+    <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      Add Item
+    </button>
+  </div>
 </div>
 
 {# Filters #}
@@ -61,6 +71,33 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+{# Import CSV Modal #}
+<div id="uploadModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Import Items from CSV</div>
+      <button onclick="document.getElementById('uploadModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px; font-size:12px; color:var(--muted); line-height:1.7;">
+      <strong style="color:var(--white);">Expected columns (first row = header):</strong><br>
+      Name · Item Code · Category · Unit · Pack Size · Unit Price (N) · Reorder Level · Notes<br><br>
+      <strong style="color:var(--white);">Tips:</strong><br>
+      • Use <strong style="color:var(--orange2);">Export CSV</strong> to download the current catalogue as a starting point.<br>
+      • Existing items are matched by <em>Item Code</em> first, then exact name — they will be updated.<br>
+      • New rows are added; blank rows are ignored.<br>
+      • Category must be one of: <em>lab_reagent, lab_consumable, usg_consumable, xray_consumable, ecg_consumable, office_supply, other</em>
+    </div>
+    <form method="post" action="{{ url_for('inventory.upload_items_csv') }}" enctype="multipart/form-data">
+      <label class="label">CSV File *</label>
+      <input type="file" name="csv_file" accept=".csv" required class="inp" style="margin-bottom:16px;">
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn-primary">Upload &amp; Import</button>
+        <button type="button" onclick="document.getElementById('uploadModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 {# Add Item Modal #}
