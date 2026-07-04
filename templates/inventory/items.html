@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Inventory Items{% endblock %}
+{% block page_title %}Inventory — Items Catalogue{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">Items Catalogue</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">Reagents, consumables and other inventory items</div>
+  </div>
+  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Add Item
+  </button>
+</div>
+
+{# Filters #}
+<form method="get" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+  <input name="q" value="{{ q }}" placeholder="Search items…" class="inp" style="width:220px;">
+  <div class="filter-drop-wrap">
+    <svg class="filter-drop-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+    <select name="cat" class="filter-drop" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for val, label in ITEM_CATEGORIES %}
+      <option value="{{ val }}" {% if cat_filter == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn-outline">Filter</button>
+  {% if cat_filter or q %}<a href="{{ url_for('inventory.items') }}" class="btn-outline">Clear</a>{% endif %}
+</form>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr>
+      <th>Name</th><th>Code</th><th>Category</th><th>Unit</th><th>Pack Size</th>
+      <th>Unit Price</th><th>Reorder Level</th><th>Total Stock</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td><a href="{{ url_for('inventory.item_detail', item_id=item.id) }}" style="color:var(--orange2); font-weight:600;">{{ item.name }}</a></td>
+        <td style="color:var(--muted);">{{ item.item_code or '—' }}</td>
+        <td><span class="badge badge-gray">{{ item.category_label }}</span></td>
+        <td style="color:var(--muted);">{{ item.unit }}</td>
+        <td style="color:var(--muted);">{{ item.pack_size or '—' }}</td>
+        <td>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}</td>
+        <td style="color:var(--muted);">{{ item.reorder_level or '—' }}</td>
+        <td>
+          {% set total = item.total_stock %}
+          <span style="color:{% if item.is_low_stock %}var(--red){% elif total > 0 %}var(--green){% else %}var(--muted){% endif %}; font-weight:600;">
+            {{ total|round(2) }} {{ item.unit }}
+          </span>
+        </td>
+        <td>
+          {% if item.is_active %}<span class="badge badge-green">Active</span>
+          {% else %}<span class="badge badge-gray">Inactive</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" style="text-align:center; color:var(--muted); padding:40px;">No items found</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Add Item Modal #}
+<div id="addModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:520px; max-width:95vw; padding:28px; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Add Inventory Item</div>
+      <button onclick="document.getElementById('addModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.add_item') }}">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div style="grid-column:1/-1;">
+          <label class="label">Item Name *</label>
+          <input name="name" class="inp" required placeholder="e.g. Hepatitis B Strip">
+        </div>
+        <div>
+          <label class="label">Item Code</label>
+          <input name="item_code" class="inp" placeholder="e.g. s064">
+        </div>
+        <div>
+          <label class="label">Category *</label>
+          <select name="category" class="inp">
+            {% for val, label in ITEM_CATEGORIES %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Unit *</label>
+          <input name="unit" class="inp" value="unit" placeholder="unit / strip / vial / ml">
+        </div>
+        <div>
+          <label class="label">Pack Size (units/pack)</label>
+          <input name="pack_size" class="inp" type="number" min="1" placeholder="e.g. 50">
+        </div>
+        <div>
+          <label class="label">Unit Price (₦)</label>
+          <input name="unit_price" class="inp" type="number" step="0.01" placeholder="e.g. 80.00">
+        </div>
+        <div>
+          <label class="label">Reorder Level</label>
+          <input name="reorder_level" class="inp" type="number" step="0.01" placeholder="Alert threshold">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="label">Notes</label>
+          <textarea name="notes" class="inp" rows="2" placeholder="Supplier, storage conditions, etc."></textarea>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Add Item</button>
+        <button type="button" onclick="document.getElementById('addModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
