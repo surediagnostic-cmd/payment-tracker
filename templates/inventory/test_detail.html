@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ test.name }}{% endblock %}
+{% block page_title %}Inventory — {{ test.name }}{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:24px; flex-wrap:wrap;">
+  <a href="{{ url_for('inventory.tests') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Tests</a>
+  <span style="color:var(--dim);">/</span>
+  <span style="color:var(--white); font-size:13px;">{{ test.name }}</span>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+  {# Info #}
+  <div class="card" style="padding:22px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px;">
+      <div>
+        <div style="font-size:18px; font-weight:800; color:var(--white);">{{ test.name }}</div>
+        <div style="color:var(--muted); font-size:12px; margin-top:4px;">LIS: {{ test.labsmart_name }}</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <span class="badge badge-blue">{{ test.case_type_label }}</span>
+        {% if test.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}
+      </div>
+    </div>
+    <button onclick="document.getElementById('editModal').style.display='flex'" class="btn-outline" style="font-size:12px; padding:7px 14px;">Edit Test</button>
+  </div>
+
+  {# Add mapping #}
+  <div class="card" style="padding:22px;">
+    <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Add Reagent Mapping</div>
+    <form method="post" action="{{ url_for('inventory.add_test_mapping', test_id=test.id) }}" style="display:flex; flex-direction:column; gap:12px;">
+      <div>
+        <label class="label">Inventory Item *</label>
+        <select name="item_id" class="inp" required>
+          <option value="">— select item —</option>
+          {% for item in all_items %}
+          <option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Qty Consumed per Test</label>
+        <input name="qty_per_test" class="inp" type="number" step="0.0001" value="1" min="0.0001">
+      </div>
+      <button type="submit" class="btn-primary" style="width:fit-content;">Add Mapping</button>
+    </form>
+  </div>
+</div>
+
+{# Mapped reagents #}
+<div class="card" style="padding:22px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">
+    Reagents &amp; Consumables
+    <span style="color:var(--muted); font-size:12px; font-weight:400; margin-left:8px;">{{ test.reagent_mappings|length }} mapped</span>
+  </div>
+  {% if test.reagent_mappings %}
+  <table>
+    <thead><tr><th>Item</th><th>Category</th><th>Unit</th><th>Qty / Test</th><th>Cost / Test</th><th></th></tr></thead>
+    <tbody>
+      {% for m in test.reagent_mappings %}
+      <tr>
+        <td><a href="{{ url_for('inventory.item_detail', item_id=m.item.id) }}" style="color:var(--orange2);">{{ m.item.name }}</a></td>
+        <td><span class="badge badge-gray">{{ m.item.category_label }}</span></td>
+        <td style="color:var(--muted);">{{ m.item.unit }}</td>
+        <td style="font-weight:600;">{{ m.qty_per_test|float|round(4) }}</td>
+        <td style="color:var(--muted);">
+          {% if m.item.unit_price %}₦{{ '{:,.4f}'.format(m.item.unit_price * m.qty_per_test) }}{% else %}—{% endif %}
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('inventory.delete_test_mapping', test_id=test.id, map_id=m.id) }}" style="margin:0;">
+            <button type="submit" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:12px; padding:4px 8px;"
+              onclick="return confirm('Remove this mapping?')">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center; padding:30px 0; color:var(--muted);">
+    No reagents mapped yet. Add mappings above to enable consumption tracking.
+  </div>
+  {% endif %}
+</div>
+
+{# Edit Modal #}
+<div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Edit Test</div>
+      <button onclick="document.getElementById('editModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('inventory.edit_test', test_id=test.id) }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label class="label">Display Name *</label>
+          <input name="name" class="inp" value="{{ test.name }}" required>
+        </div>
+        <div>
+          <label class="label">LIS Name *</label>
+          <input name="labsmart_name" class="inp" value="{{ test.labsmart_name }}" required>
+        </div>
+        <div>
+          <label class="label">Case Type</label>
+          <select name="case_type" class="inp">
+            {% for val, label in CASE_TYPES %}
+            <option value="{{ val }}" {% if test.case_type == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Save Changes</button>
+        <button type="button" onclick="document.getElementById('editModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
