@@ -373,3 +373,16 @@ class UnmatchedInvestigation(db.Model):
     suggested_test = db.relationship('TestCatalogue', foreign_keys=[suggested_test_id])
     resolved_test  = db.relationship('TestCatalogue', foreign_keys=[resolved_test_id])
     resolver       = db.relationship('User',          foreign_keys=[resolved_by])
+
+
+class ProjectedIncome(db.Model):
+    __tablename__ = "projected_income"
+    id         = db.Column(db.Integer, primary_key=True)
+    branch_id  = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    year       = db.Column(db.Integer, nullable=False)
+    month      = db.Column(db.Integer, nullable=True)  # None = yearly total
+    amount     = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    notes      = db.Column(db.String(500), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    branch     = db.relationship("Branch")
