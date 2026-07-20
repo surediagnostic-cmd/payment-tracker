@@ -272,6 +272,51 @@
         </tr>
         {% endif %}
         {% endfor %}
+
+        {# ── Projected Income + Net Position rows ── #}
+        {% set pi = income_map.get(br.id) %}
+        {% set pi_amt = pi.amount|float if pi else 0 %}
+        {% set net = pi_amt - bt.budgeted|float %}
+        <tr style="border-top:2px solid var(--border); background:rgba(16,185,129,.04);">
+          <td colspan="2" style="color:var(--green); font-weight:700; font-size:13px;">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:4px;"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            Projected Revenue
+          </td>
+          <td style="text-align:right; padding:6px 12px;">
+            {% if period == 'monthly' %}
+            <input type="number" step="0.01" min="0"
+                   class="income-input inp"
+                   data-branch="{{ br.id }}"
+                   data-year="{{ year }}"
+                   data-month="{{ month }}"
+                   value="{{ '{:.2f}'.format(pi_amt) if pi_amt > 0 else '' }}"
+                   placeholder="0.00"
+                   style="width:130px; text-align:right; padding:6px 10px; font-size:13px; border-color:rgba(16,185,129,.4);"/>
+            {% else %}
+            <span style="color:var(--green); font-weight:600;" id="inc-{{ br.id }}">
+              {% if pi_amt > 0 %}{{ "{:,.2f}".format(pi_amt) }}{% else %}—{% endif %}
+            </span>
+            {% endif %}
+          </td>
+          <td colspan="{% if period=='monthly' %}3{% else %}2{% endif %}"
+              style="color:var(--muted); font-size:11px; padding-left:8px;">
+            {% if pi and pi.notes %}{{ pi.notes }}{% endif %}
+          </td>
+          {% if period == 'monthly' %}<td id="inc-status-{{ br.id }}"></td>{% endif %}
+        </tr>
+        <tr style="background:rgba(16,185,129,.06);">
+          <td colspan="2" style="color:{% if net >= 0 %}var(--green){% else %}#f87171{% endif %}; font-weight:700; font-size:13px;">
+            Net Position
+            <span style="font-size:10px; font-weight:400; color:var(--dim);">(Revenue − Expenses budget)</span>
+          </td>
+          <td style="text-align:right; font-weight:700; color:{% if net >= 0 %}var(--green){% else %}#f87171{% endif %};"
+              id="net-{{ br.id }}">
+            {% if pi_amt > 0 or bt.budgeted > 0 %}
+              {{ '+' if net >= 0 else '' }}{{ "{:,.2f}".format(net) }}
+            {% else %}—{% endif %}
+          </td>
+          <td colspan="{% if period=='monthly' %}4{% else %}3{% endif %}"></td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -353,6 +398,53 @@ document.querySelectorAll('.budget-input').forEach(function(inp) {
   }
 
   inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+  });
+});
+{% endif %}
+
+// ── Auto-save projected income cells ─────────────────────────────────────────
+{% if period == 'monthly' %}
+document.querySelectorAll('.income-input').forEach(function(inp) {
+  function saveIncome() {
+    const brId     = inp.dataset.branch;
+    const statusEl = document.getElementById('inc-status-' + brId);
+    const netEl    = document.getElementById('net-' + brId);
+    if (statusEl) statusEl.textContent = '⏳';
+
+    const fd = new FormData();
+    fd.append('branch_id', brId);
+    fd.append('year',      inp.dataset.year);
+    fd.append('month',     inp.dataset.month);
+    fd.append('amount',    inp.value || '0');
+
+    fetch('{{ url_for("budget.save_income") }}', {method:'POST', body:fd})
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { if (statusEl) statusEl.textContent = '❌'; return; }
+        if (statusEl) {
+          statusEl.textContent = '✓';
+          setTimeout(() => { statusEl.textContent = ''; }, 2000);
+        }
+        // Recalculate net position live
+        if (netEl) {
+          const income   = parseFloat(inp.value || 0);
+          // sum all budget-input values for this branch
+          let expenses = 0;
+          document.querySelectorAll('.budget-input[data-branch="' + brId + '"]').forEach(function(b) {
+            expenses += parseFloat(b.value || 0);
+          });
+          const net = income - expenses;
+          netEl.textContent = (income > 0 || expenses > 0)
+            ? (net >= 0 ? '+' : '') + net.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})
+            : '—';
+          netEl.style.color = net >= 0 ? 'var(--green)' : '#f87171';
+        }
+      })
+      .catch(() => { if (statusEl) statusEl.textContent = '❌'; });
+  }
+  inp.addEventListener('blur', saveIncome);
   inp.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
   });
