@@ -17,7 +17,7 @@ from flask_login import login_required, current_user
 from sqlalchemy import func, extract
 
 from app import db
-from models import Branch, Category, Budget, PaymentRequest, PaymentRequestItem
+from models import Branch, Category, Budget, PaymentRequest, PaymentRequestItem, ProjectedIncome
 
 budget_bp = Blueprint("budget", __name__)
 
@@ -85,6 +85,21 @@ def _branch_totals(branches, categories, grid):
             over=a > b and b > 0,
         )
     return totals
+
+
+# ── projected income helpers ─────────────────────────────────────────────────
+
+def _get_income_map(branch_ids, year, month=None):
+    """Return {branch_id: ProjectedIncome} for the given period."""
+    q = ProjectedIncome.query.filter(
+        ProjectedIncome.branch_id.in_(branch_ids),
+        ProjectedIncome.year == year,
+    )
+    if month:
+        q = q.filter(ProjectedIncome.month == month)
+    else:
+        q = q.filter(ProjectedIncome.month.is_(None))
+    return {pi.branch_id: pi for pi in q.all()}
 
 
 # ── grid builders ─────────────────────────────────────────────────────────────
@@ -333,11 +348,23 @@ def budget_home():
         total_budgeted = sum(v["budgeted"] for v in branch_totals.values())
         total_actual   = sum(v["actual"]   for v in branch_totals.values())
 
+        # Projected income
+        bids = [br.id for br in branches]
+        if period == "yearly":
+            income_map = _get_income_map(bids, year, month=None)
+        else:
+            income_map = _get_income_map(bids, year, month=month)
+        total_projected_income = sum(
+            Decimal(str(pi.amount)) for pi in income_map.values()
+        )
+
         return render_template(
             "budget.html",
             branches=branches, categories=categories,
             grid=grid, branch_totals=branch_totals,
             total_budgeted=total_budgeted, total_actual=total_actual,
+            income_map=income_map,
+            total_projected_income=total_projected_income,
             period=period, year=year, month=month, week=week,
             month_label=month_label,
             year_range=range(now.year - 1, now.year + 3),
@@ -489,3 +516,47 @@ def budget_alerts():
 
     alerts.sort(key=lambda x: -x["pct"])
     return jsonify(alerts)
+
+
+# ── save projected income cell (AJAX) ────────────────────────────────────────
+
+@budget_bp.route("/budget/save_income", methods=["POST"])
+@login_required
+def save_income():
+    try:
+        branch_id = int(request.form["branch_id"])
+        year      = int(request.form["year"])
+        month_raw = request.form.get("month", "")
+        month     = int(month_raw) if month_raw else None
+        notes     = request.form.get("notes", "").strip()
+
+        raw = request.form.get("amount", "0").replace(",", "").strip()
+        try:
+            amount = Decimal(raw) if raw else Decimal("0")
+        except InvalidOperation:
+            return jsonify(ok=False, error="Invalid amount"), 400
+
+        if branch_id not in _allowed_branch_ids():
+            return jsonify(ok=False, error="Not authorised for this branch"), 403
+
+        existing = ProjectedIncome.query.filter_by(
+            branch_id=branch_id, year=year, month=month
+        ).first()
+
+        if existing:
+            existing.amount     = amount
+            existing.notes      = notes
+            existing.updated_at = datetime.now(timezone.utc)
+        else:
+            db.session.add(ProjectedIncome(
+                branch_id=branch_id, year=year, month=month,
+                amount=amount, notes=notes, created_by=current_user.id
+            ))
+
+        db.session.commit()
+        return jsonify(ok=True, amount=float(amount))
+
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=str(e)), 500
