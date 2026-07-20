@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}Inventory Guide{% endblock %}
+{% block page_title %}Inventory — How to Use{% endblock %}
+{% block content %}
+<div style="max-width:820px;">
+
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:24px;">
+  <a href="{{ url_for('inventory.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Inventory</a>
+  <span style="color:var(--dim);">/</span>
+  <span style="color:var(--white); font-size:13px;">How to Use</span>
+</div>
+
+<div style="margin-bottom:28px;">
+  <h1 class="section-title">Inventory Module — Step-by-Step Guide</h1>
+  <div style="color:var(--muted); font-size:13px; margin-top:6px;">Everything you need to manage reagents, consumables, and stock depletion via LabSmartLIS</div>
+</div>
+
+{% macro step(num, title, role, icon) %}
+<div style="display:flex; gap:6px; align-items:center; margin-bottom:20px; margin-top:32px;">
+  <div style="background:var(--orange); color:#fff; font-weight:800; font-size:12px; width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">{{ num }}</div>
+  <div>
+    <div style="font-size:16px; font-weight:800; color:var(--white);">{{ title }}</div>
+    {% if role %}<div style="font-size:11px; color:var(--orange2); margin-top:2px;">{{ role }}</div>{% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro tip(text) %}
+<div style="background:rgba(245,130,31,.08); border:1px solid rgba(245,130,31,.25); border-radius:8px; padding:12px 14px; margin:10px 0; font-size:13px; color:var(--muted);">
+  <strong style="color:var(--orange2);">Tip:</strong> {{ text }}
+</div>
+{% endmacro %}
+
+{% macro note(text) %}
+<div style="background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.25); border-radius:8px; padding:12px 14px; margin:10px 0; font-size:13px; color:var(--muted);">
+  <strong style="color:#60a5fa;">Note:</strong> {{ text }}
+</div>
+{% endmacro %}
+
+<!-- Quick nav -->
+<div class="card" style="padding:18px; margin-bottom:28px;">
+  <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:12px;">Jump to section</div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px;">
+    {% for anchor, label in [
+      ('#setup','1. First-time Setup'),
+      ('#catalogue','2. Item Catalogue'),
+      ('#tests','3. Test Catalogue'),
+      ('#packages','4. Packages'),
+      ('#receive','5. Receive Stock'),
+      ('#lis','6. Upload LabSmartLIS'),
+      ('#alerts','7. Low-Stock Alerts'),
+      ('#reports','8. Reports'),
+    ] %}
+    <a href="{{ anchor }}" style="padding:6px 14px; background:var(--bg2); border:1px solid var(--border); border-radius:20px; font-size:12px; color:var(--white); text-decoration:none;">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ── OVERVIEW ── -->
+<div class="card" style="padding:24px; margin-bottom:8px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:10px;">How the module works</div>
+  <div style="font-size:13px; color:var(--muted); line-height:1.8;">
+    The inventory module tracks <strong style="color:var(--white);">reagents and consumables</strong> used in your lab, radiology, and other departments.
+    Stock goes <strong style="color:var(--green);">up</strong> when you receive a delivery and comes <strong style="color:var(--orange2);">down</strong> automatically when you upload a LabSmartLIS export — it matches each test performed to the reagents it consumes.
+  </div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:16px;">
+    {% for icon, label, desc in [
+      ('📦','Item Catalogue','Every reagent & consumable'),
+      ('🧪','Test Catalogue','Each test + its reagent usage'),
+      ('📋','Packages','Multi-test panels (e.g. LFT)'),
+      ('📥','Receive Stock','Record deliveries'),
+      ('📊','LIS Upload','Auto-deplete from patient data'),
+    ] %}
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; text-align:center;">
+      <div style="font-size:22px; margin-bottom:6px;">{{ icon }}</div>
+      <div style="font-size:12px; font-weight:700; color:var(--white);">{{ label }}</div>
+      <div style="font-size:11px; color:var(--dim); margin-top:3px;">{{ desc }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ══ STEP 1: SETUP ══ -->
+<div id="setup">
+{{ step(1, 'First-time Setup', 'MDS / Accountant', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    The system ships with <strong style="color:var(--white);">132 reagents and consumables</strong> and <strong style="color:var(--white);">21 packages</strong> pre-loaded from your reagent list. You do not need to enter them manually. On first login to the Inventory section, check that they appear under <strong style="color:var(--white);">Items Catalogue</strong>.
+  </p>
+  <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+    <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">Checklist before you start:</div>
+    <div style="font-size:13px; color:var(--muted); line-height:2;">
+      ☐ &nbsp;Go to <a href="{{ url_for('inventory.items') }}" style="color:var(--orange2);">Items Catalogue</a> — confirm items loaded<br>
+      ☐ &nbsp;Go to <a href="{{ url_for('inventory.packages') }}" style="color:var(--orange2);">Packages</a> — confirm packages loaded<br>
+      ☐ &nbsp;Set <strong style="color:var(--white);">reorder levels</strong> on high-turnover items (edit each item)<br>
+      ☐ &nbsp;Do an initial <strong style="color:var(--white);">stock receive</strong> to enter your current physical stock quantities<br>
+      ☐ &nbsp;Map each test to the reagents it uses (Step 3)
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══ STEP 2: ITEM CATALOGUE ══ -->
+<div id="catalogue">
+{{ step(2, 'Item Catalogue', 'MDS / Accountant', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    The catalogue lists every item you want to track. Each item has a category (Lab Reagent, Lab Consumable, X-ray Consumable, etc.), a unit (strip, vial, ml, piece…), optional pack size, and a reorder level that triggers low-stock alerts.
+  </p>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+    <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">➕ Add a single item</div>
+      <div style="font-size:12px; color:var(--muted); line-height:1.8;">
+        1. Go to <a href="{{ url_for('inventory.items') }}" style="color:var(--orange2);">Items Catalogue</a><br>
+        2. Click <strong style="color:var(--white);">Add Item</strong><br>
+        3. Fill in name, category, unit, price, reorder level<br>
+        4. Save — item appears in the list immediately
+      </div>
+    </div>
+    <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">📤 Bulk add via CSV</div>
+      <div style="font-size:12px; color:var(--muted); line-height:1.8;">
+        1. Click <strong style="color:var(--white);">Export CSV</strong> to get current list<br>
+        2. Edit or add rows in Excel/Sheets<br>
+        3. Save as CSV<br>
+        4. Click <strong style="color:var(--white);">Import CSV</strong> and upload<br>
+        <span style="color:var(--dim);">Existing items (matched by code or name) are updated; new rows are added.</span>
+      </div>
+    </div>
+  </div>
+  {{ tip('Set a reorder level on every high-turnover reagent. The dashboard will highlight anything running low so you can reorder before you run out.') }}
+</div>
+</div>
+
+<!-- ══ STEP 3: TEST CATALOGUE ══ -->
+<div id="tests">
+{{ step(3, 'Test Catalogue & Reagent Mapping', 'MDS / Accountant / Lab Staff', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    The test catalogue connects each investigation (e.g. <em>Full Blood Count</em>) to the reagents it consumes. This is what makes automatic depletion possible — when LabSmartLIS says 50 patients had FBC, the system looks up FBC's reagent mapping and subtracts the right quantities.
+  </p>
+  <div style="background:var(--bg2); border-radius:8px; padding:14px; margin-bottom:14px;">
+    <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">How to map a test to its reagents:</div>
+    <div style="font-size:13px; color:var(--muted); line-height:2;">
+      1. Go to <a href="{{ url_for('inventory.tests') }}" style="color:var(--orange2);">Test Catalogue</a> → click <strong style="color:var(--white);">Add Test</strong><br>
+      2. Enter the test name <strong style="color:var(--white);">exactly as it appears in LabSmartLIS</strong> (the LIS Name field)<br>
+      3. Save — then click the test name to open its detail page<br>
+      4. Under <strong style="color:var(--white);">Reagent Mappings</strong>, click <strong style="color:var(--white);">+ Add Reagent</strong><br>
+      5. Select the item and enter <strong style="color:var(--white);">qty per test</strong> (e.g. 1 strip, 0.5 ml)<br>
+      6. Repeat for all reagents this test uses
+    </div>
+  </div>
+  {{ note('The LIS Name must match what LabSmartLIS exports. If depletion is not working for a test, check spelling here first — it uses fuzzy matching but an exact match is most reliable.') }}
+  {{ tip('Start with your top 10 highest-volume tests. You do not need to map every test before you begin — unmapped tests are flagged for review after each LIS upload.') }}
+</div>
+</div>
+
+<!-- ══ STEP 4: PACKAGES ══ -->
+<div id="packages">
+{{ step(4, 'Packages & Panels', 'MDS / Accountant', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    Packages are multi-test panels that appear as a single line in LabSmartLIS (e.g. <em>SURE COMPLETE HEALTH PACKAGE</em>). When the LIS upload encounters a package name, it automatically expands it into its constituent tests and depletes reagents for each one.
+  </p>
+  <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+    <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">How to configure a package:</div>
+    <div style="font-size:13px; color:var(--muted); line-height:2;">
+      1. Go to <a href="{{ url_for('inventory.packages') }}" style="color:var(--orange2);">Packages</a> — the 21 standard packages are already created<br>
+      2. Click a package name to open it<br>
+      3. Under <strong style="color:var(--white);">Constituent Tests</strong>, tick all the tests included in this panel<br>
+      4. Save — the package will now expand correctly on LIS upload
+    </div>
+  </div>
+  {{ tip('Check the LIS Name field on each package matches exactly what appears in your LabSmartLIS export. Edit it if needed.') }}
+</div>
+</div>
+
+<!-- ══ STEP 5: RECEIVE STOCK ══ -->
+<div id="receive">
+{{ step(5, 'Receiving Stock (Deliveries)', 'Accountant / Lab Staff', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    Every time reagents or consumables arrive from a supplier, record the receipt here. This adds the quantity to the stock level for the chosen branch (or Central if no branch selected).
+  </p>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+    <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">📝 Single item receipt</div>
+      <div style="font-size:12px; color:var(--muted); line-height:1.8;">
+        1. Go to <a href="{{ url_for('inventory.receive_stock') }}" style="color:var(--orange2);">Receive Stock</a><br>
+        2. Select the item, branch, and enter quantity<br>
+        3. Optionally add unit cost, batch number, expiry date<br>
+        4. Click <strong style="color:var(--white);">Record Receipt</strong>
+      </div>
+    </div>
+    <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">📤 Bulk receive via CSV</div>
+      <div style="font-size:12px; color:var(--muted); line-height:1.8;">
+        1. Click <strong style="color:var(--white);">Download Template</strong> for a pre-filled CSV<br>
+        2. Fill in quantities, costs, and batch numbers<br>
+        3. Click <strong style="color:var(--white);">Bulk Upload CSV</strong> and upload the file<br>
+        <span style="color:var(--dim);">Useful after a large delivery with many different items.</span>
+      </div>
+    </div>
+  </div>
+  {{ note('Stock levels are per-branch. If your lab at Ijofi receives reagents, select "Ijofi" as the branch. Leave Branch blank to record to Central Stock.') }}
+</div>
+</div>
+
+<!-- ══ STEP 6: LIS UPLOAD ══ -->
+<div id="lis">
+{{ step(6, 'LabSmartLIS Upload (Auto-depletion)', 'Accountant', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 16px;">
+    This is the core of the system. Export a case report from LabSmartLIS (weekly or monthly), upload it here, and the system automatically works out how many reagents were consumed — no manual counting needed.
+  </p>
+
+  <div style="counter-reset: lis-step;">
+  {% for title, body in [
+    ('Export from LabSmartLIS', 'In LabSmartLIS, go to Reports → Case Report → select your date range → Export to CSV or Excel. Make sure the export includes: Case ID, Investigation Name, Branch, Date, and Status (to exclude cancelled cases).'),
+    ('Upload the file', 'Go to <a href="' ~ url_for('inventory.uploads') ~ '" style="color:var(--orange2);">LIS Uploads</a> → click <strong style="color:var(--white);">Upload LIS File</strong> → select your export file → choose the branch (if single-branch export) → Upload.'),
+    ('Review unmatched tests', 'The system fuzzy-matches investigation names to your Test Catalogue. Any names it cannot confidently match appear in a <strong style="color:var(--white);">Review</strong> table. For each:<br>• <strong style="color:var(--white);">Map it</strong> to the correct test — it will be remembered next time<br>• <strong style="color:var(--white);">Skip it</strong> if it\'s a test with no reagent consumption (e.g. ECG interpretation)'),
+    ('Apply the upload', 'Once you\'ve resolved unmatched tests, click <strong style="color:var(--white);">Apply Upload</strong>. Stock levels are updated instantly. The upload is marked as <em>Applied</em> and cannot be re-applied.'),
+  ] %}
+  <div style="display:flex; gap:14px; margin-bottom:16px; align-items:flex-start;">
+    <div style="background:var(--orange); color:#fff; font-size:11px; font-weight:800; min-width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-top:1px; flex-shrink:0;">{{ loop.index }}</div>
+    <div>
+      <div style="font-size:13px; font-weight:700; color:var(--white); margin-bottom:4px;">{{ title }}</div>
+      <div style="font-size:13px; color:var(--muted); line-height:1.7;">{{ body | safe }}</div>
+    </div>
+  </div>
+  {% endfor %}
+  </div>
+
+  {{ tip('Upload weekly for better accuracy — a monthly upload works but smaller batches make it easier to spot anomalies.') }}
+  {{ note('Cancelled cases in LabSmartLIS are automatically excluded from consumption. Only completed investigations deplete stock.') }}
+</div>
+</div>
+
+<!-- ══ STEP 7: LOW STOCK ALERTS ══ -->
+<div id="alerts">
+{{ step(7, 'Low-Stock Alerts', 'All roles', '') }}
+<div class="card" style="padding:22px;">
+  <p style="color:var(--muted); font-size:13px; line-height:1.8; margin:0 0 14px;">
+    Any item whose current stock falls below its <strong style="color:var(--white);">Reorder Level</strong> appears as a red alert on the Inventory Dashboard. Check this daily to catch shortages before they disrupt operations.
+  </p>
+  <div style="background:var(--bg2); border-radius:8px; padding:14px;">
+    <div style="font-size:12px; font-weight:700; color:var(--white); margin-bottom:8px;">To set or change a reorder level:</div>
+    <div style="font-size:13px; color:var(--muted); line-height:2;">
+      1. Go to <a href="{{ url_for('inventory.items') }}" style="color:var(--orange2);">Items Catalogue</a><br>
+      2. Click the item name → click <strong style="color:var(--white);">Edit</strong><br>
+      3. Enter a value in <strong style="color:var(--white);">Reorder Level</strong> (in the same unit as the item)<br>
+      4. Save — the item will now appear on the dashboard when stock drops below this level
+    </div>
+  </div>
+  {{ tip('A reorder level of 10 on an item measured in strips means "alert me when fewer than 10 strips remain."') }}
+</div>
+</div>
+
+<!-- ══ STEP 8: REPORTS ══ -->
+<div id="reports">
+{{ step(8, 'Reports & Adjustments', 'MDS / Accountant', '') }}
+<div class="card" style="padding:22px;">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div>
+      <div style="font-size:13px; font-weight:700; color:var(--white); margin-bottom:8px;">📊 Consumption Report</div>
+      <div style="font-size:13px; color:var(--muted); line-height:1.7;">
+        Go to <a href="{{ url_for('inventory.reports') }}" style="color:var(--orange2);">Reports</a> → select a date range and branch → view total received vs consumed per item, with estimated cost.
+        Use this monthly to track reagent spend.
+      </div>
+    </div>
+    <div>
+      <div style="font-size:13px; font-weight:700; color:var(--white); margin-bottom:8px;">⚙️ Stock Adjustments</div>
+      <div style="font-size:13px; color:var(--muted); line-height:1.7;">
+        After a physical stock count, correct the system using <a href="{{ url_for('inventory.adjust_stock') }}" style="color:var(--orange2);">Adjust Stock</a>.
+        Choose <em>Adjustment</em> to correct a variance or <em>Write-off</em> to record damaged/expired items.
+        Every adjustment is logged with a timestamp and user.
+      </div>
+    </div>
+  </div>
+  {{ tip('Do a physical count at the end of each month and use Stock Adjustment to reconcile any differences before the next LIS upload.') }}
+</div>
+</div>
+
+<!-- ── ROLE SUMMARY ── -->
+<div class="card" style="padding:22px; margin-top:8px; margin-bottom:8px;">
+  <div style="font-size:13px; font-weight:700; color:var(--white); margin-bottom:14px;">Quick reference — who can do what</div>
+  <table>
+    <thead><tr><th>Action</th><th>MDS</th><th>Accountant</th><th>Lab Staff</th></tr></thead>
+    <tbody>
+      {% for action, mds, acc, lab in [
+        ('View inventory dashboard', '✓', '✓', '✓'),
+        ('Add / edit items', '✓', '✓', ''),
+        ('Add / edit tests & mappings', '✓', '✓', ''),
+        ('Configure packages', '✓', '✓', ''),
+        ('Receive stock', '✓', '✓', '✓'),
+        ('Adjust / write-off stock', '✓', '✓', '✓'),
+        ('Upload LabSmartLIS file', '✓', '✓', ''),
+        ('Apply LIS upload', '✓', '✓', ''),
+        ('View reports', '✓', '✓', '✓'),
+      ] %}
+      <tr>
+        <td style="color:var(--white); font-size:13px;">{{ action }}</td>
+        <td style="text-align:center; color:var(--green); font-weight:700;">{{ mds }}</td>
+        <td style="text-align:center; color:var(--green); font-weight:700;">{{ acc }}</td>
+        <td style="text-align:center; color:var(--green); font-weight:700;">{{ lab }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div style="text-align:center; padding:20px 0 10px; color:var(--dim); font-size:12px;">
+  Questions? Contact your system administrator or MDS.
+</div>
+
+</div>
+{% endblock %}
