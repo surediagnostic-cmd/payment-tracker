@@ -1063,3 +1063,12 @@ def bulk_receive():
     else:
         flash(msg, "success")
     return redirect(url_for("inventory.dashboard"))
+
+
+# ── Inventory Guide ───────────────────────────────────────────────────────────
+
+@inventory_bp.route("/guide")
+@login_required
+@_inventory_access
+def guide():
+    return render_template("inventory/guide.html")
