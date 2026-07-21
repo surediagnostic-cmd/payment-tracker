@@ -117,6 +117,10 @@ class PaymentRequestItem(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
     rate = db.Column(db.Numeric(14, 2), nullable=False)
+    # Optional link to inventory item — enables in-transit tracking
+    inventory_item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='SET NULL'), nullable=True)
+    qty_ordered       = db.Column(db.Numeric(14, 4), nullable=True)
+    inventory_item    = db.relationship('InventoryItem', foreign_keys=[inventory_item_id])
     # For parent items with children: amount stored as 0; children carry the actual amounts.
     # This prevents double-counting in financial aggregations.
     amount = db.Column(db.Numeric(14, 2), nullable=False)
@@ -386,3 +390,99 @@ class ProjectedIncome(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     branch     = db.relationship("Branch")
+
+
+# ── Feature #2: In-Transit Stock ──────────────────────────────────────────────
+
+class InTransitStock(db.Model):
+    __tablename__ = "in_transit_stock"
+    id                      = db.Column(db.Integer, primary_key=True)
+    payment_request_id      = db.Column(db.Integer, db.ForeignKey('payment_requests.id', ondelete='CASCADE'), nullable=False)
+    payment_request_item_id = db.Column(db.Integer, db.ForeignKey('payment_request_items.id', ondelete='CASCADE'), nullable=False)
+    inventory_item_id       = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
+    branch_id               = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    qty                     = db.Column(db.Numeric(14, 4), nullable=False)
+    status                  = db.Column(db.String(20), default='in_transit')  # in_transit|received|cancelled
+    confirmed_by            = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    confirmed_at            = db.Column(db.DateTime, nullable=True)
+    created_at              = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    payment_request  = db.relationship('PaymentRequest')
+    inventory_item   = db.relationship('InventoryItem')
+    branch           = db.relationship('Branch')
+    confirmer        = db.relationship('User', foreign_keys=[confirmed_by])
+
+
+# ── Feature #4: Budget Line Items (sub-items) ─────────────────────────────────
+
+class BudgetLineItem(db.Model):
+    __tablename__ = "budget_line_items"
+    id          = db.Column(db.Integer, primary_key=True)
+    branch_id   = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='CASCADE'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id', ondelete='CASCADE'), nullable=False)
+    year        = db.Column(db.Integer, nullable=False)
+    month       = db.Column(db.Integer, nullable=False)
+    name        = db.Column(db.String(200), nullable=False)
+    amount      = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    sort_order  = db.Column(db.Integer, default=0)
+    created_by  = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    branch   = db.relationship('Branch')
+    category = db.relationship('Category')
+
+
+# ── Feature #3: Revenue Share ─────────────────────────────────────────────────
+
+class RevenueShareRecipient(db.Model):
+    __tablename__ = "revenue_share_recipients"
+    id              = db.Column(db.Integer, primary_key=True)
+    name            = db.Column(db.String(200), nullable=False)
+    account_name    = db.Column(db.String(200), nullable=True)
+    account_number  = db.Column(db.String(30), nullable=True)
+    bank_name       = db.Column(db.String(100), nullable=True)
+    description     = db.Column(db.String(500), nullable=True)
+    is_active       = db.Column(db.Boolean, default=True)
+    created_at      = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class RevenueSharePeriod(db.Model):
+    __tablename__ = "revenue_share_periods"
+    id            = db.Column(db.Integer, primary_key=True)
+    label         = db.Column(db.String(100), nullable=False)   # e.g. "July 2026 (Week 1)"
+    branch_id     = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    gross_revenue = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    period_start  = db.Column(db.Date, nullable=True)
+    period_end    = db.Column(db.Date, nullable=True)
+    status        = db.Column(db.String(20), default='draft')   # draft|finalised
+    notes         = db.Column(db.Text, nullable=True)
+    created_by    = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    branch        = db.relationship('Branch')
+    allocations   = db.relationship('RevenueShareAllocation', back_populates='period', cascade='all, delete-orphan')
+
+    @property
+    def total_allocated_pct(self):
+        return sum(float(a.percentage or 0) for a in self.allocations)
+
+    @property
+    def total_allocated_amount(self):
+        return sum(float(a.amount_calculated or 0) for a in self.allocations)
+
+
+class RevenueShareAllocation(db.Model):
+    __tablename__ = "revenue_share_allocations"
+    id                 = db.Column(db.Integer, primary_key=True)
+    period_id          = db.Column(db.Integer, db.ForeignKey('revenue_share_periods.id', ondelete='CASCADE'), nullable=False)
+    recipient_id       = db.Column(db.Integer, db.ForeignKey('revenue_share_recipients.id', ondelete='CASCADE'), nullable=False)
+    percentage         = db.Column(db.Numeric(6, 4), nullable=False, default=0)
+    amount_calculated  = db.Column(db.Numeric(14, 2), nullable=True)
+    payment_request_id = db.Column(db.Integer, db.ForeignKey('payment_requests.id', ondelete='SET NULL'), nullable=True)
+    is_paid            = db.Column(db.Boolean, default=False)
+    paid_at            = db.Column(db.DateTime, nullable=True)
+    notes              = db.Column(db.String(500), nullable=True)
+
+    period             = db.relationship('RevenueSharePeriod', back_populates='allocations')
+    recipient          = db.relationship('RevenueShareRecipient')
+    payment_request    = db.relationship('PaymentRequest')
