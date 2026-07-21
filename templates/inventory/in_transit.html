@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}In-Transit Stock{% endblock %}
+{% block page_title %}In-Transit Inventory{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">In-Transit Stock</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">
+      Items approved for purchase — awaiting physical delivery confirmation
+    </div>
+  </div>
+  <a href="{{ url_for('inventory.dashboard') }}" class="btn-outline">← Inventory</a>
+</div>
+
+{% if items %}
+<div class="card" style="padding:0; overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Category</th>
+        <th>Qty Expected</th>
+        <th>Branch</th>
+        <th>Purchase Ref</th>
+        <th>Date Approved</th>
+        <th>Status</th>
+        <th style="width:160px;">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in items %}
+      <tr>
+        <td>
+          <a href="{{ url_for('inventory.item_detail', item_id=t.inventory_item_id) }}"
+             style="color:var(--orange2); font-weight:600;">
+            {{ t.inventory_item.name }}
+          </a>
+        </td>
+        <td>
+          <span class="badge badge-gray">{{ t.inventory_item.category_label }}</span>
+        </td>
+        <td style="font-weight:700; color:var(--white);">
+          {{ t.qty|float|round(2) }} {{ t.inventory_item.unit }}
+        </td>
+        <td style="color:var(--muted);">{{ t.branch.name if t.branch else '—' }}</td>
+        <td>
+          <a href="{{ url_for('requests.view_request', req_id=t.payment_request_id) }}"
+             style="color:var(--orange2); font-size:12px;">
+            {{ t.payment_request.reference }}
+          </a>
+        </td>
+        <td style="color:var(--dim); font-size:12px;">
+          {{ t.created_at.strftime('%d %b %Y') }}
+        </td>
+        <td>
+          {% if t.status == 'in_transit' %}
+            <span class="badge badge-orange">In Transit</span>
+          {% elif t.status == 'received' %}
+            <span class="badge badge-green">Received</span>
+          {% else %}
+            <span class="badge badge-gray">{{ t.status|title }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if t.status == 'in_transit' %}
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <form method="POST" action="{{ url_for('inventory.confirm_receipt', transit_id=t.id) }}"
+                  onsubmit="return confirm('Confirm receipt of {{ t.qty|float|round(2) }} {{ t.inventory_item.unit }} of {{ t.inventory_item.name|replace("'","\\'")|safe }}?');">
+              <button class="btn-primary" style="padding:5px 12px; font-size:12px;">
+                ✓ Confirm
+              </button>
+            </form>
+            {% if current_user.is_mds %}
+            <form method="POST" action="{{ url_for('inventory.cancel_transit', transit_id=t.id) }}"
+                  onsubmit="return confirm('Cancel this transit entry?');">
+              <button class="btn-danger" style="padding:5px 10px; font-size:12px;">✕</button>
+            </form>
+            {% endif %}
+          </div>
+          {% elif t.status == 'received' %}
+          <div style="font-size:12px; color:var(--muted);">
+            By {{ t.confirmer.name if t.confirmer else '—' }}<br>
+            <span style="color:var(--dim);">{{ t.confirmed_at.strftime('%d %b %Y') if t.confirmed_at else '' }}</span>
+          </div>
+          {% else %}
+          <span style="color:var(--dim); font-size:12px;">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="padding:60px 20px; text-align:center;">
+  <svg width="40" height="40" fill="none" stroke="var(--muted)" stroke-width="1.5"
+       viewBox="0 0 24 24" style="margin:0 auto 12px; display:block;">
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+    <circle cx="12" cy="10" r="3"/>
+  </svg>
+  <div style="color:var(--muted); font-size:15px; font-weight:600;">No in-transit items</div>
+  <div style="color:var(--dim); font-size:13px; margin-top:6px;">
+    Items will appear here when an approved purchase request includes inventory items.
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
