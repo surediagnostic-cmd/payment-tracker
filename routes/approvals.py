@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 from sqlalchemy.orm import subqueryload, joinedload
 from app import db
-from models import PaymentRequest, PaymentRequestItem, User
+from models import PaymentRequest, PaymentRequestItem, User, InTransitStock
 from utils import send_email
 
 approvals_bp = Blueprint("approvals", __name__)
@@ -27,6 +27,7 @@ def _mds_required(f):
 def review(req_id):
     pr = PaymentRequest.query.options(
         subqueryload(PaymentRequest.items).joinedload(PaymentRequestItem.category),
+        subqueryload(PaymentRequest.items).subqueryload(PaymentRequestItem.children),
         joinedload(PaymentRequest.branch),
         joinedload(PaymentRequest.submitter),
     ).filter_by(id=req_id).first_or_404()
@@ -81,6 +82,35 @@ def review(req_id):
             pr.mds_comment = comment
             pr.reviewed_at = datetime.now(timezone.utc)
             db.session.commit()
+
+            # ── Create InTransitStock entries for inventory-linked items ──────────
+            if action == "approve":
+                try:
+                    inv_items = PaymentRequestItem.query.filter(
+                        PaymentRequestItem.request_id == pr.id,
+                        PaymentRequestItem.inventory_item_id.isnot(None),
+                    ).all()
+                    transit_count = 0
+                    for item in inv_items:
+                        qty = float(item.qty_ordered or item.quantity or 1)
+                        if qty > 0:
+                            db.session.add(InTransitStock(
+                                payment_request_id=pr.id,
+                                payment_request_item_id=item.id,
+                                inventory_item_id=item.inventory_item_id,
+                                branch_id=pr.branch_id,
+                                qty=qty,
+                            ))
+                            transit_count += 1
+                    if transit_count:
+                        db.session.commit()
+                        current_app.logger.info(
+                            f"Created {transit_count} in-transit entries for {pr.reference}"
+                        )
+                except Exception as transit_err:
+                    current_app.logger.warning(
+                        f"In-transit creation failed for {pr.reference}: {transit_err}"
+                    )
 
             try:
                 submitter = User.query.get(pr.submitted_by)
