@@ -6,7 +6,7 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 from sqlalchemy.orm import subqueryload, joinedload
 from app import db
-from models import PaymentRequest, PaymentRequestItem, Branch, Category, User
+from models import PaymentRequest, PaymentRequestItem, Branch, Category, User, InventoryItem
 from utils import send_email
 
 requests_bp = Blueprint("requests", __name__)
@@ -271,6 +271,7 @@ def new_request():
         return redirect(url_for("requests.dashboard"))
 
     categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    inventory_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
     user_branch_list = current_user.branches
 
     if not user_branch_list:
@@ -349,15 +350,19 @@ def new_request():
                     p_amount = p_qty * p_rate
                     email_lines.append(f"  • {desc} — ₦{p_amount:,.2f}")
 
+                inv_item_id = it.get("inventory_item_id")
+                qty_ord     = it.get("qty_ordered")
                 parent_item = PaymentRequestItem(
-                    request_id  = pr.id,
-                    parent_id   = None,
-                    description = desc,
-                    category_id = int(it["category_id"]),
-                    quantity    = p_qty,
-                    rate        = p_rate,
-                    amount      = p_amount,
-                    notes       = (it.get("notes") or "").strip() or None,
+                    request_id        = pr.id,
+                    parent_id         = None,
+                    description       = desc,
+                    category_id       = int(it["category_id"]),
+                    quantity          = p_qty,
+                    rate              = p_rate,
+                    amount            = p_amount,
+                    notes             = (it.get("notes") or "").strip() or None,
+                    inventory_item_id = int(inv_item_id) if inv_item_id else None,
+                    qty_ordered       = Decimal(str(qty_ord)) if qty_ord else None,
                 )
                 db.session.add(parent_item)
                 db.session.flush()  # get parent_item.id
@@ -369,15 +374,19 @@ def new_request():
                     cqty    = int(str(c.get("quantity") or 1))
                     crate   = Decimal(str(c.get("rate") or 0).replace(",", ""))
                     camount = cqty * crate
+                    c_inv_id  = c.get("inventory_item_id")
+                    c_qty_ord = c.get("qty_ordered")
                     db.session.add(PaymentRequestItem(
-                        request_id  = pr.id,
-                        parent_id   = parent_item.id,
-                        description = cdesc,
-                        category_id = int(c["category_id"]),
-                        quantity    = cqty,
-                        rate        = crate,
-                        amount      = camount,
-                        notes       = (c.get("notes") or "").strip() or None,
+                        request_id        = pr.id,
+                        parent_id         = parent_item.id,
+                        description       = cdesc,
+                        category_id       = int(c["category_id"]),
+                        quantity          = cqty,
+                        rate              = crate,
+                        amount            = camount,
+                        notes             = (c.get("notes") or "").strip() or None,
+                        inventory_item_id = int(c_inv_id) if c_inv_id else None,
+                        qty_ordered       = Decimal(str(c_qty_ord)) if c_qty_ord else None,
                     ))
                     email_lines.append(f"    ↳ {cdesc} — ₦{camount:,.2f}")
 
@@ -410,7 +419,8 @@ def new_request():
             print(f"[submit error]: {e}", flush=True)
             flash(f"Error submitting request: {str(e)}", "error")
 
-    return render_template("new_request.html", categories=categories, user_branches=user_branch_list)
+    return render_template("new_request.html", categories=categories,
+                           user_branches=user_branch_list, inventory_items=inventory_items)
 
 
 @requests_bp.route("/requests/<int:req_id>")
