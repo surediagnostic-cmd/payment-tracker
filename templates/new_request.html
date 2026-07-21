@@ -76,10 +76,36 @@
                     style="padding:8px 9px; font-size:13px; display:none;">✕</button>
           </div>
           <!-- Note field -->
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
             <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             <input data-field="notes" class="inp" placeholder="Note for this item (optional)" maxlength="500"
                    style="flex:1; padding:6px 12px; font-size:12px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
+          </div>
+          <!-- Inventory link (optional) -->
+          <div style="margin-bottom:8px;">
+            <button type="button" onclick="toggleInvPanel(0)"
+                    style="background:none; border:none; color:var(--dim); font-size:11px; cursor:pointer; padding:2px 0; display:inline-flex; align-items:center; gap:4px;"
+                    onmouseover="this.style.color='var(--orange2)'" onmouseout="this.style.color='var(--dim)'">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+              Tag inventory item (optional)
+            </button>
+            <div data-inv-panel="0" style="display:none; margin-top:6px; padding:8px 12px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
+              <div style="display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;">
+                <div>
+                  <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Inventory Item</div>
+                  <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;">
+                    <option value="">— none —</option>
+                    {% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}</option>{% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
+                  <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
+                         style="font-size:12px; padding:5px 8px;"/>
+                </div>
+              </div>
+              <div style="font-size:10px; color:var(--dim); margin-top:5px;">On approval, this creates an In-Transit entry for Lab Staff to confirm.</div>
+            </div>
           </div>
           <!-- Sub-items container -->
           <div class="sub-items" data-for="0" style="margin-left:18px; margin-bottom:0;"></div>
@@ -146,6 +172,9 @@
 // Category options string (shared across all rows)
 const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}">{{ cat.name }}</option>{% endfor %}`;
 
+// Inventory items for optional linking
+const inventoryOptions = `<option value="">— none —</option>{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}</option>{% endfor %}`;
+
 let uidSeq = 1; // 0 is used by the static first row
 document.getElementById('dateField').value = new Date().toISOString().split('T')[0];
 
@@ -173,10 +202,31 @@ function subItemHtml(parentUid, uid) {
     <button type="button" class="btn-danger" onclick="removeSubItem(${uid}, ${parentUid})"
             style="padding:8px 9px; font-size:13px;">✕</button>
   </div>
-  <div style="display:flex; align-items:center; gap:8px;">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
     <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     <input data-field="notes" class="inp" placeholder="Note (optional)" maxlength="500"
            style="flex:1; padding:5px 10px; font-size:11px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
+  </div>
+  <div>
+    <button type="button" onclick="toggleInvPanel(${uid})"
+            style="background:none; border:none; color:var(--dim); font-size:10px; cursor:pointer; padding:1px 0; display:inline-flex; align-items:center; gap:4px;"
+            onmouseover="this.style.color='var(--orange2)'" onmouseout="this.style.color='var(--dim)'">
+      <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      Tag inventory item (optional)
+    </button>
+    <div data-inv-panel="${uid}" style="display:none; margin-top:5px; padding:7px 10px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
+      <div style="display:grid; grid-template-columns:1fr 110px; gap:7px; align-items:center;">
+        <div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:2px; font-weight:600;">Inventory Item</div>
+          <select data-field="inventory_item_id" class="inp" style="font-size:11px; padding:4px 7px;">${inventoryOptions}</select>
+        </div>
+        <div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:2px; font-weight:600;">Qty</div>
+          <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
+                 style="font-size:11px; padding:4px 7px;"/>
+        </div>
+      </div>
+    </div>
   </div>
 </div>`;
 }
@@ -199,10 +249,32 @@ function parentRowHtml(uid) {
     <button type="button" class="btn-danger remove-btn" onclick="removeRow(${uid})"
             style="padding:8px 9px; font-size:13px;">✕</button>
   </div>
-  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
     <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--dim); flex-shrink:0;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     <input data-field="notes" class="inp" placeholder="Note for this item (optional)" maxlength="500"
            style="flex:1; padding:6px 12px; font-size:12px; color:var(--muted); background:var(--bg); border-color:var(--dim);"/>
+  </div>
+  <div style="margin-bottom:8px;">
+    <button type="button" onclick="toggleInvPanel(${uid})"
+            style="background:none; border:none; color:var(--dim); font-size:11px; cursor:pointer; padding:2px 0; display:inline-flex; align-items:center; gap:4px;"
+            onmouseover="this.style.color='var(--orange2)'" onmouseout="this.style.color='var(--dim)'">
+      <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      Tag inventory item (optional)
+    </button>
+    <div data-inv-panel="${uid}" style="display:none; margin-top:6px; padding:8px 12px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
+      <div style="display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;">
+        <div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Inventory Item</div>
+          <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;">${inventoryOptions}</select>
+        </div>
+        <div>
+          <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
+          <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
+                 style="font-size:12px; padding:5px 8px;"/>
+        </div>
+      </div>
+      <div style="font-size:10px; color:var(--dim); margin-top:5px;">On approval, creates an In-Transit entry for Lab Staff to confirm.</div>
+    </div>
   </div>
   <div class="sub-items" data-for="${uid}" style="margin-left:18px;"></div>
   <div style="margin:6px 0 16px 0;">
@@ -216,6 +288,14 @@ function parentRowHtml(uid) {
   </div>
   <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
 </div>`;
+}
+
+// ── Inventory panel toggle ────────────────────────────────────────────────────
+
+function toggleInvPanel(uid) {
+  const panel = document.querySelector(`[data-inv-panel="${uid}"]`);
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -393,12 +473,17 @@ document.getElementById('prForm').addEventListener('submit', function(e) {
         alert('Rate must be greater than zero for all sub-items.');
         valid = false; return;
       }
+      const cInvPanel = childRow.querySelector('[data-inv-panel]');
+      const cInvId  = cInvPanel ? (cInvPanel.querySelector('[data-field="inventory_item_id"]') || {}).value || '' : '';
+      const cInvQty = cInvPanel ? (cInvPanel.querySelector('[data-field="qty_ordered"]') || {}).value || '' : '';
       children.push({
-        description: cDesc,
-        category_id: cCatId,
-        quantity:    cQty,
-        rate:        cRate,
-        notes:       (childRow.querySelector('[data-field="notes"]').value || '').trim(),
+        description:       cDesc,
+        category_id:       cCatId,
+        quantity:          cQty,
+        rate:              cRate,
+        notes:             (childRow.querySelector('[data-field="notes"]').value || '').trim(),
+        inventory_item_id: cInvId || null,
+        qty_ordered:       cInvQty || null,
       });
     });
 
@@ -412,13 +497,18 @@ document.getElementById('prForm').addEventListener('submit', function(e) {
       valid = false; return;
     }
 
+    const pInvPanel = parentRow.querySelector('[data-inv-panel]');
+    const pInvId  = pInvPanel ? (pInvPanel.querySelector('[data-field="inventory_item_id"]') || {}).value || '' : '';
+    const pInvQty = pInvPanel ? (pInvPanel.querySelector('[data-field="qty_ordered"]') || {}).value || '' : '';
     items.push({
-      description: desc,
-      category_id: catId,
-      quantity:    pQty,
-      rate:        pRate,
-      notes:       (parentRow.querySelector('[data-field="notes"]').value || '').trim(),
-      children:    children,
+      description:       desc,
+      category_id:       catId,
+      quantity:          pQty,
+      rate:              pRate,
+      notes:             (parentRow.querySelector('[data-field="notes"]').value || '').trim(),
+      inventory_item_id: pInvId || null,
+      qty_ordered:       pInvQty || null,
+      children:          children,
     });
   });
 
