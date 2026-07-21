@@ -168,12 +168,16 @@ def dashboard():
 
     recent_uploads = LisUpload.query.order_by(LisUpload.created_at.desc()).limit(5).all()
 
+    from models import InTransitStock
+    in_transit_count = InTransitStock.query.filter_by(status="in_transit").count()
+
     return render_template("inventory/dashboard.html",
         total_items=total_items,
         pending_uploads=pending_uploads,
         low_stock=low_stock,
         recent_txns=recent_txns,
         recent_uploads=recent_uploads,
+        in_transit_count=in_transit_count,
     )
 
 
@@ -1072,3 +1076,71 @@ def bulk_receive():
 @_inventory_access
 def guide():
     return render_template("inventory/guide.html")
+
+
+# ── In-Transit Stock ──────────────────────────────────────────────────────────
+
+@inventory_bp.route("/in-transit")
+@login_required
+@_inventory_access
+def in_transit_list():
+    from models import InTransitStock
+    q = InTransitStock.query.order_by(InTransitStock.created_at.desc())
+    if not current_user.is_mds:
+        user_branch_ids = [b.id for b in current_user.branches]
+        q = q.filter(InTransitStock.branch_id.in_(user_branch_ids))
+    items = q.all()
+    return render_template("inventory/in_transit.html", items=items)
+
+
+@inventory_bp.route("/in-transit/<int:transit_id>/confirm", methods=["POST"])
+@login_required
+@_inventory_access
+def confirm_receipt(transit_id):
+    from models import InTransitStock
+    transit = InTransitStock.query.get_or_404(transit_id)
+    if transit.status != "in_transit":
+        flash("Already processed.", "warning")
+        return redirect(url_for("inventory.in_transit_list"))
+
+    if not current_user.is_mds:
+        user_branch_ids = [b.id for b in current_user.branches]
+        if transit.branch_id not in user_branch_ids:
+            flash("Access denied.", "error")
+            return redirect(url_for("inventory.in_transit_list"))
+
+    ref_label = transit.payment_request.reference if transit.payment_request else f"PR#{transit.payment_request_id}"
+    _apply_txn(
+        item_id=transit.inventory_item_id,
+        branch_id=transit.branch_id,
+        txn_type="receive",
+        qty=float(transit.qty),
+        user_id=current_user.id,
+        reference=ref_label,
+        notes=f"Confirmed receipt from purchase request {ref_label}",
+    )
+
+    transit.status = "received"
+    transit.confirmed_by = current_user.id
+    transit.confirmed_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    flash(f"Receipt confirmed — {transit.inventory_item.name} stock updated.", "success")
+    return redirect(url_for("inventory.in_transit_list"))
+
+
+@inventory_bp.route("/in-transit/<int:transit_id>/cancel", methods=["POST"])
+@login_required
+def cancel_transit(transit_id):
+    from models import InTransitStock
+    if not current_user.is_mds:
+        flash("MDS access required.", "error")
+        return redirect(url_for("inventory.in_transit_list"))
+    transit = InTransitStock.query.get_or_404(transit_id)
+    if transit.status != "in_transit":
+        flash("Already processed.", "warning")
+        return redirect(url_for("inventory.in_transit_list"))
+    transit.status = "cancelled"
+    db.session.commit()
+    flash("Transit entry cancelled.", "warning")
+    return redirect(url_for("inventory.in_transit_list"))
