@@ -455,3 +455,151 @@ def delete_recipient(rec_id):
         try: db.session.rollback()
         except Exception: pass
         return jsonify(ok=False, error=str(e)), 500
+
+
+
+# ── Branch Allocation Templates ──────────────────────────────────────────────
+
+@revenue_share_bp.route("/templates")
+@login_required
+@_finance_required
+def templates_page():
+    branches   = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    recipients = RevenueShareRecipient.query.filter_by(is_active=True).order_by(RevenueShareRecipient.name).all()
+    from models import BranchAllocationTemplate
+    tpls    = BranchAllocationTemplate.query.all()
+    tpl_map = {(t.branch_id, t.recipient_id): float(t.percentage) for t in tpls}
+    return render_template("revenue_share/templates.html",
+                           branches=branches, recipients=recipients, tpl_map=tpl_map)
+
+
+@revenue_share_bp.route("/templates/save", methods=["POST"])
+@login_required
+@_finance_required
+def save_template():
+    try:
+        from models import BranchAllocationTemplate
+        branch_id    = int(request.form["branch_id"])
+        recipient_id = int(request.form["recipient_id"])
+        pct_raw      = request.form.get("percentage", "0").replace(",", "").strip()
+        pct = Decimal(pct_raw) if pct_raw else Decimal("0")
+
+        tpl = BranchAllocationTemplate.query.filter_by(
+            branch_id=branch_id, recipient_id=recipient_id
+        ).first()
+        if tpl:
+            tpl.percentage = pct
+            tpl.updated_at = datetime.now(timezone.utc)
+            tpl.updated_by = current_user.id
+        else:
+            tpl = BranchAllocationTemplate(
+                branch_id=branch_id, recipient_id=recipient_id,
+                percentage=pct, updated_by=current_user.id,
+            )
+            db.session.add(tpl)
+        db.session.commit()
+
+        total = db.session.query(
+            func.coalesce(func.sum(BranchAllocationTemplate.percentage), 0)
+        ).filter_by(branch_id=branch_id).scalar()
+        return jsonify(ok=True, pct=float(pct), total_pct=float(total or 0))
+    except (InvalidOperation, ValueError) as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=f"Invalid value: {e}"), 400
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=str(e)), 500
+
+
+@revenue_share_bp.route("/templates/load")
+@login_required
+@_finance_required
+def load_branch_template():
+    from models import BranchAllocationTemplate
+    branch_id = request.args.get("branch_id", type=int)
+    if not branch_id:
+        return jsonify(ok=False, error="branch_id required"), 400
+    tpls  = BranchAllocationTemplate.query.filter_by(branch_id=branch_id).all()
+    data  = {str(t.recipient_id): float(t.percentage) for t in tpls}
+    total = sum(data.values())
+    return jsonify(ok=True, template=data, total_pct=round(total, 3))
+
+
+@revenue_share_bp.route("/revenue/from-system")
+@login_required
+@_finance_required
+def fetch_system_revenue():
+    import calendar
+    from models import ProjectedIncome
+    branch_id = request.args.get("branch_id", type=int)
+    year      = request.args.get("year",      type=int)
+    month     = request.args.get("month",     type=int)
+    if not all([branch_id, year, month]):
+        return jsonify(ok=False, error="branch_id, year, and month are required"), 400
+    pi = ProjectedIncome.query.filter_by(branch_id=branch_id, year=year, month=month).first()
+    if pi:
+        return jsonify(ok=True, amount=float(pi.amount),
+                       label=f"Projected Income – {calendar.month_name[month]} {year}")
+    return jsonify(ok=False, error="No projected income found for this branch/period")
+
+
+@revenue_share_bp.route("/revenue/upload-lis", methods=["POST"])
+@login_required
+@_finance_required
+def upload_lis_csv():
+    import csv, io
+    file = request.files.get("lis_file")
+    if not file or not file.filename:
+        return jsonify(ok=False, error="No file uploaded"), 400
+
+    branch_filter = request.form.get("branch_filter", "").strip().lower()
+
+    try:
+        raw    = file.read().decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(raw))
+        headers = [h.strip() for h in (reader.fieldnames or [])]
+
+        REVENUE_KWS = ["amount", "revenue", "total", "price", "fee", "bill", "charge", "cost"]
+        rev_col = next(
+            (h for kw in REVENUE_KWS for h in headers if kw in h.lower()),
+            None
+        )
+        if not rev_col:
+            return jsonify(ok=False,
+                           error=f"Cannot find a revenue column. Headers detected: {', '.join(headers[:12])}"), 400
+
+        BRANCH_KWS = ["branch", "location", "centre", "center", "site"]
+        branch_col = next(
+            (h for kw in BRANCH_KWS for h in headers if kw in h.lower()),
+            None
+        )
+
+        total   = Decimal("0")
+        count   = 0
+        skipped = 0
+        sample  = []
+
+        for row in reader:
+            if branch_filter and branch_col:
+                if branch_filter not in (row.get(branch_col) or "").strip().lower():
+                    skipped += 1
+                    continue
+            raw_val = (row.get(rev_col) or "").replace(",", "").replace("₦", "").replace("NGN", "").strip()
+            try:
+                val = Decimal(raw_val) if raw_val else Decimal("0")
+                if val > 0:
+                    total += val
+                    count += 1
+                    if len(sample) < 5:
+                        sample.append({"amount": float(val),
+                                       "row": dict(list(row.items())[:4])})
+            except InvalidOperation:
+                pass
+
+        return jsonify(ok=True, total=float(total), count=count,
+                       skipped=skipped, rev_col=rev_col,
+                       branch_col=branch_col, sample=sample)
+    except Exception as e:
+        return jsonify(ok=False, error=f"Parse error: {e}"), 400
