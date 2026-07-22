@@ -371,6 +371,47 @@ def finalise_period(period_id):
         return redirect(url_for("revenue_share.period_detail", period_id=period_id))
 
 
+@revenue_share_bp.route("/periods/<int:period_id>/revert", methods=["POST"])
+@login_required
+@_finance_required
+def revert_period(period_id):
+    """Revert a finalised period back to draft — only if no linked PRs have been approved."""
+    try:
+        period = RevenueSharePeriod.query.get_or_404(period_id)
+        if period.status != "finalised":
+            return jsonify(ok=False, error="Period is not finalised."), 400
+
+        blocked = []
+        for alloc in period.allocations:
+            if alloc.payment_request_id:
+                pr = PaymentRequest.query.get(alloc.payment_request_id)
+                if pr and pr.status in ("approved", "rejected"):
+                    blocked.append(pr.reference)
+
+        if blocked:
+            return jsonify(
+                ok=False,
+                error="Cannot revert — payment request(s) already reviewed by MDS: " + ", ".join(blocked)
+            ), 400
+
+        for alloc in period.allocations:
+            if alloc.payment_request_id:
+                pr = PaymentRequest.query.get(alloc.payment_request_id)
+                if pr:
+                    PaymentRequestItem.query.filter_by(request_id=pr.id).delete()
+                    db.session.delete(pr)
+                alloc.payment_request_id = None
+
+        period.status = "draft"
+        db.session.commit()
+        return jsonify(ok=True)
+
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=str(e)), 500
+
+
 @revenue_share_bp.route("/periods/<int:period_id>/allocations/<int:alloc_id>/toggle-paid", methods=["POST"])
 @login_required
 @_finance_required
@@ -603,3 +644,4 @@ def upload_lis_csv():
                        branch_col=branch_col, sample=sample)
     except Exception as e:
         return jsonify(ok=False, error=f"Parse error: {e}"), 400
+
