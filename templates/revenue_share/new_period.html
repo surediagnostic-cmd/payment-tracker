@@ -8,77 +8,204 @@
   </a>
 </div>
 
-<h1 style="margin:0 0 24px; font-size:1.35rem; font-weight:700;">New Revenue Share Period</h1>
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+  <h1 style="margin:0; font-size:1.35rem; font-weight:700;">New Weekly Run</h1>
+  <a href="{{ url_for('revenue_share.templates_page') }}"
+     style="font-size:.8rem; color:var(--muted); text-decoration:none; border:1px solid var(--border);
+            border-radius:7px; padding:5px 12px;">
+    ⚙ Manage Templates
+  </a>
+</div>
 
-<form method="POST" style="max-width:700px;">
+<form method="POST" id="period-form" enctype="multipart/form-data" style="max-width:700px;">
 
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+  {# ── Period Details ──────────────────────────────────────────────────────── #}
+  <div class="kpi-card" style="padding:20px; margin-bottom:16px;">
+    <h3 style="margin:0 0 14px; font-size:.95rem; font-weight:600;">Period Details</h3>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
 
-    <div class="kpi-card" style="padding:20px; grid-column:1/-1;">
-      <h3 style="margin:0 0 16px; font-size:.95rem; font-weight:600;">Period Details</h3>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div>
+        <label class="label">Branch</label>
+        <select name="branch_id" id="branch-sel" class="inp" style="width:100%;"
+                onchange="onBranchChange()">
+          <option value="">— All / General —</option>
+          {% for br in branches %}
+          <option value="{{ br.id }}"
+            {{ 'selected' if request.form.get('branch_id') == br.id|string }}>
+            {{ br.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
 
-        <div>
-          <label class="label">Period Label *</label>
-          <input name="label" class="inp" required placeholder="e.g. June 2025 Revenue Share"
-                 style="width:100%;" value="{{ request.form.get('label', '') }}">
+      <div>
+        <label class="label">Period Label *</label>
+        <input name="label" id="period-label" class="inp" required
+               placeholder="e.g. Week 30 – Ijofi" style="width:100%;"
+               value="{{ request.form.get('label', '') }}">
+      </div>
+
+      <div>
+        <label class="label">Period Start</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input name="period_start" id="start-inp" class="inp" type="date" style="flex:1;"
+                 value="{{ request.form.get('period_start', '') }}" onchange="updateLabel()">
         </div>
+      </div>
 
+      <div>
+        <label class="label">Period End</label>
+        <input name="period_end" id="end-inp" class="inp" type="date" style="width:100%;"
+               value="{{ request.form.get('period_end', '') }}" onchange="updateLabel()">
+      </div>
+
+      {# Week quick-fill buttons #}
+      <div style="grid-column:1/-1; display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" onclick="fillWeek(0)"
+                style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
+                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
+          This Week (Mon–Sun)
+        </button>
+        <button type="button" onclick="fillWeek(-1)"
+                style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
+                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
+          Last Week
+        </button>
+        <button type="button" onclick="fillWeek(-2)"
+                style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
+                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
+          2 Weeks Ago
+        </button>
+      </div>
+
+      <div style="grid-column:1/-1;">
+        <label class="label">Notes</label>
+        <textarea name="notes" class="inp" rows="2" style="width:100%; resize:vertical;"
+                  placeholder="Optional notes">{{ request.form.get('notes', '') }}</textarea>
+      </div>
+
+    </div>
+  </div>
+
+  {# ── Revenue Source ──────────────────────────────────────────────────────── #}
+  <div class="kpi-card" style="padding:20px; margin-bottom:16px;">
+    <h3 style="margin:0 0 14px; font-size:.95rem; font-weight:600;">Gross Revenue</h3>
+
+    <div style="display:flex; gap:0; margin-bottom:16px; border:1px solid var(--border); border-radius:9px; overflow:hidden;">
+      <label id="tab-manual" onclick="setSource('manual')"
+             style="flex:1; text-align:center; padding:9px 4px; cursor:pointer; font-size:.85rem;
+                    background:var(--orange); color:#fff; font-weight:600; transition:all .15s;">
+        <input type="radio" name="rev_source" value="manual" checked style="display:none;">
+        Manual Entry
+      </label>
+      <label id="tab-system" onclick="setSource('system')"
+             style="flex:1; text-align:center; padding:9px 4px; cursor:pointer; font-size:.85rem;
+                    background:var(--card); color:var(--muted); transition:all .15s;">
+        <input type="radio" name="rev_source" value="system" style="display:none;">
+        From System
+      </label>
+      <label id="tab-lis" onclick="setSource('lis')"
+             style="flex:1; text-align:center; padding:9px 4px; cursor:pointer; font-size:.85rem;
+                    background:var(--card); color:var(--muted); transition:all .15s;">
+        <input type="radio" name="rev_source" value="lis" style="display:none;">
+        Upload LIS CSV
+      </label>
+    </div>
+
+    {# Manual entry #}
+    <div id="src-manual">
+      <label class="label">Gross Revenue (₦) *</label>
+      <input name="gross_revenue" id="gross-input" class="inp" type="number" step="0.01" min="0"
+             required placeholder="0.00" style="width:100%; max-width:260px;"
+             value="{{ request.form.get('gross_revenue', '') }}"
+             oninput="recalcAmounts()">
+    </div>
+
+    {# From system #}
+    <div id="src-system" style="display:none;">
+      <p style="font-size:.875rem; color:var(--muted); margin:0 0 10px;">
+        Loads Projected Income for the selected branch and month.
+      </p>
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
         <div>
-          <label class="label">Branch</label>
-          <select name="branch_id" class="inp" style="width:100%;">
-            <option value="">— All / General —</option>
-            {% for br in branches %}
-            <option value="{{ br.id }}"
-              {{ 'selected' if request.form.get('branch_id') == br.id|string }}>
-              {{ br.name }}
+          <label class="label">Year</label>
+          <input id="sys-year" type="number" class="inp" style="width:90px;"
+                 value="{{ now.year if now else '' }}" min="2020" max="2099">
+        </div>
+        <div>
+          <label class="label">Month</label>
+          <select id="sys-month" class="inp" style="width:130px;">
+            {% for m in range(1,13) %}
+            <option value="{{ m }}" {{ 'selected' if m == (now.month if now else 1) }}>
+              {{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}
             </option>
             {% endfor %}
           </select>
         </div>
-
-        <div>
-          <label class="label">Gross Revenue (₦) *</label>
-          <input name="gross_revenue" class="inp" type="number" step="0.01" min="0"
-                 required placeholder="0.00" style="width:100%;"
-                 value="{{ request.form.get('gross_revenue', '') }}"
-                 id="gross-input" oninput="recalcAmounts()">
-        </div>
-
-        <div></div>
-
-        <div>
-          <label class="label">Period Start</label>
-          <input name="period_start" class="inp" type="date" style="width:100%;"
-                 value="{{ request.form.get('period_start', '') }}">
-        </div>
-
-        <div>
-          <label class="label">Period End</label>
-          <input name="period_end" class="inp" type="date" style="width:100%;"
-                 value="{{ request.form.get('period_end', '') }}">
-        </div>
-
-        <div style="grid-column:1/-1;">
-          <label class="label">Notes</label>
-          <textarea name="notes" class="inp" rows="2" style="width:100%; resize:vertical;"
-                    placeholder="Optional notes">{{ request.form.get('notes', '') }}</textarea>
-        </div>
-
+        <button type="button" onclick="fetchSystemRevenue()"
+                class="btn-primary" style="font-size:.85rem; padding:7px 16px;">
+          Fetch
+        </button>
       </div>
+      <div id="sys-result" style="margin-top:10px; font-size:.875rem; display:none;"></div>
     </div>
+
+    {# LIS CSV Upload #}
+    <div id="src-lis" style="display:none;">
+      <p style="font-size:.875rem; color:var(--muted); margin:0 0 10px;">
+        Upload a LabSmartLIS CSV export. Revenue totals are automatically extracted.
+      </p>
+      <div id="lis-drop-zone"
+           style="border:2px dashed var(--border); border-radius:10px; padding:28px;
+                  text-align:center; cursor:pointer; transition:border-color .2s; margin-bottom:12px;"
+           onclick="document.getElementById('lis-file-inp').click()"
+           ondragover="event.preventDefault(); this.style.borderColor='var(--orange)'"
+           ondragleave="this.style.borderColor='var(--border)'"
+           ondrop="handleDrop(event)">
+        <div style="font-size:2rem; margin-bottom:6px;">📂</div>
+        <div style="font-size:.875rem; color:var(--muted);">
+          Drag &amp; drop CSV here, or <span style="color:var(--orange);">click to browse</span>
+        </div>
+        <div id="lis-filename" style="margin-top:6px; font-size:.82rem; color:var(--muted);"></div>
+      </div>
+      <input type="file" id="lis-file-inp" accept=".csv,.txt" style="display:none;"
+             onchange="previewLisCsv(this.files[0])">
+      <div>
+        <label class="label" style="margin-bottom:4px;">
+          Branch Filter <span style="color:var(--muted); font-weight:400;">(optional — filters by branch column if present)</span>
+        </label>
+        <input id="lis-branch-filter" class="inp" placeholder="e.g. Ijofi"
+               style="width:100%; max-width:260px;">
+      </div>
+      <div id="lis-result" style="margin-top:12px; font-size:.875rem; display:none;"></div>
+      <button type="button" id="lis-parse-btn" onclick="parseLisCsv()"
+              class="btn-primary" style="margin-top:10px; font-size:.85rem; display:none;">
+        Parse &amp; Use This Revenue
+      </button>
+    </div>
+
+    {# Hidden total that actually gets submitted #}
+    <input type="hidden" name="gross_revenue" id="gross-hidden" value="{{ request.form.get('gross_revenue', '') }}">
+    <input type="hidden" name="rev_source" id="rev-source-hidden" value="manual">
 
   </div>
 
-  {# ── Recipient allocations ─────────────────────────────────────────────── #}
-  <div class="kpi-card" style="padding:20px; margin-bottom:20px;">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+  {# ── Recipient Allocations ───────────────────────────────────────────────── #}
+  <div class="kpi-card" style="padding:20px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
       <h3 style="margin:0; font-size:.95rem; font-weight:600;">Recipient Allocations</h3>
-      <div style="font-size:.875rem; color:var(--muted);">
-        Total: <span id="total-pct-display"
-          style="font-weight:700; color:var(--orange);">0.0%</span>
-        &nbsp;|&nbsp;
-        ₦<span id="total-amt-display">0</span>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button type="button" onclick="loadTemplate()"
+                style="font-size:.8rem; padding:5px 13px; border:1px solid var(--orange);
+                       border-radius:7px; background:transparent; color:var(--orange); cursor:pointer;">
+          Load Template
+        </button>
+        <div style="font-size:.875rem; color:var(--muted);">
+          Total: <span id="total-pct-display"
+            style="font-weight:700; color:var(--orange);">0.0%</span>
+          &nbsp;|&nbsp;
+          ₦<span id="total-amt-display">0</span>
+        </div>
       </div>
     </div>
 
@@ -110,10 +237,12 @@
             {% if rec.account_number %} · {{ rec.account_number }}{% endif %}
           </td>
           <td style="padding:8px 8px; text-align:right; width:110px;">
-            <input type="number" name="pct_{{ rec.id }}" class="inp pct-field"
+            <input type="number" name="pct_{{ rec.id }}" id="pct-{{ rec.id }}"
+                   class="inp pct-field"
                    step="0.01" min="0" max="100" placeholder="0"
                    value="{{ request.form.get('pct_' ~ rec.id, '') }}"
                    style="width:80px; text-align:right; padding:4px 6px;"
+                   data-rid="{{ rec.id }}"
                    oninput="recalcAmounts()">
           </td>
           <td id="amt-{{ rec.id }}" style="padding:8px 8px; text-align:right; color:var(--muted);">—</td>
@@ -122,7 +251,7 @@
       </tbody>
     </table>
     <p style="font-size:.8rem; color:var(--muted); margin:0;">
-      Leave a field blank or at 0 to exclude that recipient from this period.
+      Leave blank or 0 to exclude a recipient from this period.
     </p>
     {% endif %}
   </div>
@@ -131,24 +260,244 @@
     <a href="{{ url_for('revenue_share.index') }}" class="btn-outline" style="text-decoration:none;">
       Cancel
     </a>
-    <button type="submit" class="btn-primary">Create Period (Draft)</button>
+    <button type="submit" class="btn-primary" onclick="prepareSubmit()">
+      Create Period (Draft)
+    </button>
   </div>
 
 </form>
 
 <script>
-const recIds = {{ recipients|map(attribute='id')|list|tojson }};
+const recIds   = {{ recipients|map(attribute='id')|list|tojson }};
+const LOAD_TPL = "{{ url_for('revenue_share.load_branch_template') }}";
+const SYS_URL  = "{{ url_for('revenue_share.fetch_system_revenue') }}";
+const LIS_URL  = "{{ url_for('revenue_share.upload_lis_csv') }}";
 
+let currentSource  = 'manual';
+let lisFile        = null;
+let lisDetectedAmt = 0;
+let sysDetectedAmt = 0;
+
+// ── Revenue source tabs ─────────────────────────────────────────────────────
+function setSource(src) {
+  currentSource = src;
+  document.getElementById('rev-source-hidden').value = src;
+  ['manual','system','lis'].forEach(s => {
+    const tab = document.getElementById('tab-' + s);
+    const pnl = document.getElementById('src-' + s);
+    const active = (s === src);
+    tab.style.background = active ? 'var(--orange)' : 'var(--card)';
+    tab.style.color      = active ? '#fff' : 'var(--muted)';
+    tab.style.fontWeight = active ? '600' : '400';
+    pnl.style.display    = active ? '' : 'none';
+  });
+  // manual input gets required attr only when active
+  document.getElementById('gross-input').required = (src === 'manual');
+  recalcAmounts();
+}
+
+// ── Week quick-fill ─────────────────────────────────────────────────────────
+function fillWeek(offset) {
+  const today = new Date();
+  const day   = today.getDay(); // 0=Sun … 6=Sat
+  const mon   = new Date(today);
+  mon.setDate(today.getDate() - ((day === 0 ? 7 : day) - 1) + offset * 7);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const fmt = d => d.toISOString().slice(0, 10);
+  document.getElementById('start-inp').value = fmt(mon);
+  document.getElementById('end-inp').value   = fmt(sun);
+  updateLabel();
+}
+
+function updateLabel() {
+  const s  = document.getElementById('start-inp').value;
+  const e  = document.getElementById('end-inp').value;
+  const br = document.getElementById('branch-sel');
+  const brName = br.options[br.selectedIndex]?.text || '';
+  if (!s) return;
+  const d   = new Date(s + 'T00:00:00');
+  const wn  = getWeekNum(d);
+  const mon = d.toLocaleString('en-GB', {month:'short'});
+  const yr  = d.getFullYear();
+  const label = document.getElementById('period-label');
+  if (!label.dataset.userEdited) {
+    label.value = [
+      `Week ${wn} – ${mon} ${yr}`,
+      brName && brName !== '— All / General —' ? brName : ''
+    ].filter(Boolean).join(' · ');
+  }
+}
+
+function getWeekNum(d) {
+  const start = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - start) / 86400000 + start.getDay() + 1) / 7);
+}
+
+document.getElementById('period-label').addEventListener('input', function() {
+  this.dataset.userEdited = this.value ? '1' : '';
+});
+
+// ── Branch change → auto-load template ─────────────────────────────────────
+function onBranchChange() {
+  updateLabel();
+  loadTemplate(true); // silent: don't alert if no template
+}
+
+function loadTemplate(silent) {
+  const brId = document.getElementById('branch-sel').value;
+  if (!brId) {
+    if (!silent) alert('Select a branch first.');
+    return;
+  }
+  fetch(`${LOAD_TPL}?branch_id=${brId}`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) {
+        if (!silent) alert(d.error || 'No template found.');
+        return;
+      }
+      const tpl = d.template;
+      let loaded = 0;
+      recIds.forEach(rid => {
+        const inp = document.getElementById(`pct-${rid}`);
+        if (inp && tpl[rid] !== undefined) {
+          inp.value = tpl[rid] > 0 ? tpl[rid] : '';
+          loaded++;
+        } else if (inp) {
+          inp.value = '';
+        }
+      });
+      recalcAmounts();
+      if (!silent && loaded === 0) alert('Template exists but has no percentages set.');
+    })
+    .catch(() => { if (!silent) alert('Could not load template.'); });
+}
+
+// ── System revenue fetch ────────────────────────────────────────────────────
+function fetchSystemRevenue() {
+  const brId  = document.getElementById('branch-sel').value;
+  const year  = document.getElementById('sys-year').value;
+  const month = document.getElementById('sys-month').value;
+  if (!brId) { alert('Select a branch first.'); return; }
+  const el = document.getElementById('sys-result');
+  el.style.display = '';
+  el.innerHTML = '<span style="color:var(--muted)">Fetching…</span>';
+
+  fetch(`${SYS_URL}?branch_id=${brId}&year=${year}&month=${month}`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) {
+        el.innerHTML = `<span style="color:var(--red)">✗ ${d.error}</span>`;
+        return;
+      }
+      sysDetectedAmt = d.amount;
+      el.innerHTML = `
+        <div style="padding:10px 14px; border-radius:9px; border:1px solid var(--green);
+                    background:rgba(34,197,94,.07); color:var(--green); display:flex;
+                    align-items:center; justify-content:space-between; gap:12px;">
+          <span>${d.label}: <strong>₦${fmt(d.amount)}</strong></span>
+          <button type="button" onclick="useSysRevenue()"
+                  style="font-size:.8rem; padding:4px 12px; border:1px solid var(--green);
+                         border-radius:6px; background:transparent; color:var(--green); cursor:pointer;">
+            Use This Amount
+          </button>
+        </div>`;
+    })
+    .catch(() => { el.innerHTML = '<span style="color:var(--red)">Fetch failed.</span>'; });
+}
+
+function useSysRevenue() {
+  document.getElementById('gross-hidden').value = sysDetectedAmt;
+  document.getElementById('gross-input').value  = sysDetectedAmt;
+  recalcAmounts();
+  document.getElementById('sys-result').innerHTML +=
+    '<div style="margin-top:6px; color:var(--green); font-size:.82rem;">✓ Amount applied</div>';
+}
+
+// ── LIS CSV upload ──────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('lis-drop-zone').style.borderColor = 'var(--border)';
+  const f = e.dataTransfer.files[0];
+  if (f) previewLisCsv(f);
+}
+
+function previewLisCsv(file) {
+  if (!file) return;
+  lisFile = file;
+  document.getElementById('lis-filename').textContent = file.name;
+  document.getElementById('lis-parse-btn').style.display = '';
+  document.getElementById('lis-result').style.display = 'none';
+}
+
+function parseLisCsv() {
+  if (!lisFile) { alert('No file selected.'); return; }
+  const brFilter = document.getElementById('lis-branch-filter').value;
+  const fd = new FormData();
+  fd.append('lis_file', lisFile);
+  fd.append('branch_filter', brFilter);
+  const el = document.getElementById('lis-result');
+  el.style.display = '';
+  el.innerHTML = '<span style="color:var(--muted)">Parsing CSV…</span>';
+
+  fetch(LIS_URL, { method:'POST', body:fd })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) {
+        el.innerHTML = `<span style="color:var(--red)">✗ ${d.error}</span>`;
+        return;
+      }
+      lisDetectedAmt = d.total;
+      const skipNote = d.skipped > 0
+        ? `<span style="color:var(--muted)"> (${d.skipped} rows filtered out)</span>`
+        : '';
+      el.innerHTML = `
+        <div style="padding:10px 14px; border-radius:9px; border:1px solid var(--green);
+                    background:rgba(34,197,94,.07);">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <div style="color:var(--green);">
+              ✓ <strong>${d.count} records</strong> · Revenue column: <code>${d.rev_col}</code>
+              ${d.branch_col ? `· Branch col: <code>${d.branch_col}</code>` : ''}
+              ${skipNote}
+            </div>
+            <div style="font-size:1.05rem; font-weight:700; color:var(--green);">₦${fmt(d.total)}</div>
+          </div>
+          <div style="margin-top:10px;">
+            <button type="button" onclick="useLisRevenue()"
+                    style="font-size:.85rem; padding:6px 16px; border:1px solid var(--green);
+                           border-radius:7px; background:var(--green); color:#fff; cursor:pointer; font-weight:600;">
+              Use ₦${fmt(d.total)} as Gross Revenue
+            </button>
+          </div>
+        </div>`;
+    })
+    .catch(() => { el.innerHTML = '<span style="color:var(--red)">Parse failed.</span>'; });
+}
+
+function useLisRevenue() {
+  document.getElementById('gross-hidden').value = lisDetectedAmt;
+  document.getElementById('gross-input').value  = lisDetectedAmt;
+  recalcAmounts();
+}
+
+// ── Amount recalc ───────────────────────────────────────────────────────────
 function fmt(n) {
-  return parseFloat(n || 0).toLocaleString('en-NG', {maximumFractionDigits: 0});
+  return parseFloat(n || 0).toLocaleString('en-NG', {maximumFractionDigits:0});
+}
+
+function getGross() {
+  if (currentSource === 'manual') {
+    return parseFloat(document.getElementById('gross-input').value || 0);
+  }
+  return parseFloat(document.getElementById('gross-hidden').value || 0);
 }
 
 function recalcAmounts() {
-  const gross = parseFloat(document.getElementById('gross-input').value || 0);
-  let totalPct = 0;
-  let totalAmt = 0;
+  const gross = getGross();
+  let totalPct = 0, totalAmt = 0;
   recIds.forEach(rid => {
-    const inp = document.querySelector(`input[name="pct_${rid}"]`);
+    const inp = document.getElementById(`pct-${rid}`);
     const pct = parseFloat(inp ? inp.value || 0 : 0);
     totalPct += pct;
     const amt = gross * pct / 100;
@@ -157,16 +506,29 @@ function recalcAmounts() {
     if (amtEl) amtEl.textContent = pct > 0 ? fmt(amt) : '—';
   });
   const pctEl = document.getElementById('total-pct-display');
-  const amtEl = document.getElementById('total-amt-display');
   if (pctEl) {
     pctEl.textContent = totalPct.toFixed(1) + '%';
     pctEl.style.color = Math.abs(totalPct - 100) < 0.01
       ? 'var(--green)' : totalPct > 100 ? 'var(--red)' : 'var(--orange)';
   }
+  const amtEl = document.getElementById('total-amt-display');
   if (amtEl) amtEl.textContent = fmt(totalAmt);
 }
 
-// Run on load to handle form re-submit repopulation
+// Sync hidden gross_revenue field before submit
+function prepareSubmit() {
+  if (currentSource !== 'manual') {
+    document.getElementById('gross-input').value = document.getElementById('gross-hidden').value;
+  } else {
+    document.getElementById('gross-hidden').value = document.getElementById('gross-input').value;
+  }
+}
+
+// Initialise
 recalcAmounts();
+// Auto-fill this week on first load if dates are empty
+if (!document.getElementById('start-inp').value) fillWeek(0);
+// Auto-load template if branch pre-selected (form re-submit)
+if (document.getElementById('branch-sel').value) loadTemplate(true);
 </script>
 {% endblock %}
