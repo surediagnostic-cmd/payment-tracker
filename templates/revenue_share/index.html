@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Revenue Share{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 style="margin:0; font-size:1.4rem; font-weight:700;">Revenue Share</h1>
+    <p style="margin:4px 0 0; color:var(--muted); font-size:.9rem;">Gross revenue allocation and disbursement tracker</p>
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="{{ url_for('revenue_share.recipients') }}" class="btn-outline" style="text-decoration:none;">
+      Manage Recipients
+    </a>
+    <a href="{{ url_for('revenue_share.new_period') }}" class="btn-primary" style="text-decoration:none;">
+      + New Period
+    </a>
+  </div>
+</div>
+
+{# ── KPI row ──────────────────────────────────────────────────────────────── #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:16px; margin-bottom:28px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Periods</div>
+    <div class="kpi-value">{{ periods|length }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Finalised &amp; Disbursed</div>
+    <div class="kpi-value" style="color:var(--green);">
+      ₦{{ "{:,.0f}".format(total_disbursed) }}
+    </div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Pending Transfers</div>
+    <div class="kpi-value" style="color:{{ 'var(--orange)' if total_pending else 'var(--muted)' }};">
+      {{ total_pending }}
+    </div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Active Recipients</div>
+    <div class="kpi-value">{{ recipients_all|length }}</div>
+  </div>
+</div>
+
+{# ── Analytics row ─────────────────────────────────────────────────────────── #}
+{% if chart_periods or rec_totals %}
+<div style="display:grid; grid-template-columns:2fr 1fr; gap:20px; margin-bottom:28px;">
+
+  {# Bar chart #}
+  {% if chart_periods %}
+  <div class="kpi-card" style="padding:20px;">
+    <h3 style="margin:0 0 16px; font-size:.95rem; font-weight:600;">Gross Revenue vs Disbursed (last {{ chart_periods|length }} finalised periods)</h3>
+    <canvas id="revenueChart" height="200"></canvas>
+  </div>
+  {% endif %}
+
+  {# Per-recipient breakdown #}
+  {% if rec_totals %}
+  <div class="kpi-card" style="padding:20px;">
+    <h3 style="margin:0 0 14px; font-size:.95rem; font-weight:600;">Recipient Totals (finalised)</h3>
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:.85rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); color:var(--muted);">Recipient</th>
+            <th style="text-align:right; padding:5px 8px; border-bottom:1px solid var(--border); color:var(--muted);">Periods</th>
+            <th style="text-align:right; padding:5px 8px; border-bottom:1px solid var(--border); color:var(--muted);">Total (₦)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rec in rec_totals %}
+          <tr>
+            <td style="padding:6px 8px;">{{ rec.name }}</td>
+            <td style="padding:6px 8px; text-align:right; color:var(--muted);">{{ rec.count }}</td>
+            <td style="padding:6px 8px; text-align:right; font-weight:600;">{{ "{:,.0f}".format(rec.total) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endif %}
+
+{# ── Periods table ─────────────────────────────────────────────────────────── #}
+<div class="kpi-card" style="padding:0; overflow:hidden;">
+  <div style="padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
+    <h3 style="margin:0; font-size:.95rem; font-weight:600;">All Periods</h3>
+  </div>
+  {% if periods %}
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
+      <thead>
+        <tr style="background:var(--bg);">
+          <th style="padding:10px 16px; text-align:left; color:var(--muted); font-weight:500;">Period</th>
+          <th style="padding:10px 16px; text-align:left; color:var(--muted); font-weight:500;">Branch</th>
+          <th style="padding:10px 12px; text-align:right; color:var(--muted); font-weight:500;">Gross Revenue</th>
+          <th style="padding:10px 12px; text-align:right; color:var(--muted); font-weight:500;">Allocated %</th>
+          <th style="padding:10px 12px; text-align:right; color:var(--muted); font-weight:500;">Disbursed</th>
+          <th style="padding:10px 12px; text-align:center; color:var(--muted); font-weight:500;">Status</th>
+          <th style="padding:10px 16px; text-align:center; color:var(--muted); font-weight:500;">Date</th>
+          <th style="padding:10px 16px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in periods %}
+        {% set total_pct = p.total_allocated_pct %}
+        {% set total_amt = p.total_allocated_amount %}
+        <tr style="border-top:1px solid var(--border);">
+          <td style="padding:12px 16px; font-weight:500;">{{ p.label }}</td>
+          <td style="padding:12px 16px; color:var(--muted);">{{ p.branch.name if p.branch else '—' }}</td>
+          <td style="padding:12px 12px; text-align:right;">₦{{ "{:,.0f}".format(p.gross_revenue or 0) }}</td>
+          <td style="padding:12px 12px; text-align:right;">
+            <span style="color:{{ 'var(--green)' if total_pct == 100 else ('var(--orange)' if total_pct > 0 else 'var(--muted)') }};">
+              {{ "{:.1f}".format(total_pct) }}%
+            </span>
+          </td>
+          <td style="padding:12px 12px; text-align:right; font-weight:500;">
+            ₦{{ "{:,.0f}".format(total_amt) }}
+          </td>
+          <td style="padding:12px 12px; text-align:center;">
+            {% if p.status == 'finalised' %}
+              <span class="badge" style="background:rgba(0,200,100,.15); color:var(--green);">Finalised</span>
+            {% else %}
+              <span class="badge" style="background:rgba(255,165,0,.15); color:var(--orange);">Draft</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px; text-align:center; color:var(--muted); font-size:.82rem;">
+            {{ p.created_at.strftime('%d %b %Y') if p.created_at else '—' }}
+          </td>
+          <td style="padding:12px 16px;">
+            <a href="{{ url_for('revenue_share.period_detail', period_id=p.id) }}"
+               style="color:var(--orange); text-decoration:none; font-size:.85rem; font-weight:500;">
+              View →
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:40px; text-align:center; color:var(--muted);">
+    <p style="font-size:1.1rem; margin-bottom:8px;">No periods yet</p>
+    <p style="font-size:.9rem; margin:0;">
+      <a href="{{ url_for('revenue_share.new_period') }}" style="color:var(--orange);">Create the first period →</a>
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+{# Chart.js #}
+{% if chart_periods %}
+<script>
+(function() {
+  const labels = {{ chart_periods|map(attribute='label')|list|tojson }};
+  const grossData  = {{ chart_periods|map(attribute='gross_revenue')|map('float')|list|tojson }};
+  const disbursed  = {{ chart_periods|map(attribute='total_allocated_amount')|map('float')|list|tojson }};
+
+  const isDark = document.documentElement.dataset.theme === 'dark'
+               || (!document.documentElement.dataset.theme
+                   && window.matchMedia('(prefers-color-scheme:dark)').matches);
+
+  const gridColor  = isDark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.07)';
+  const labelColor = isDark ? '#aaa' : '#666';
+
+  new Chart(document.getElementById('revenueChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Gross Revenue', data: grossData,
+          backgroundColor: 'rgba(255,140,0,.25)', borderColor: 'rgba(255,140,0,.7)',
+          borderWidth: 1.5, borderRadius: 4 },
+        { label: 'Disbursed', data: disbursed,
+          backgroundColor: 'rgba(0,200,100,.25)', borderColor: 'rgba(0,200,100,.7)',
+          borderWidth: 1.5, borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { labels: { color: labelColor, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: labelColor, font: { size: 10 } }, grid: { color: gridColor } },
+        y: {
+          ticks: {
+            color: labelColor, font: { size: 10 },
+            callback: v => '₦' + (v >= 1e6 ? (v/1e6).toFixed(1)+'m' : v.toLocaleString()),
+          },
+          grid: { color: gridColor },
+        },
+      },
+    },
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
