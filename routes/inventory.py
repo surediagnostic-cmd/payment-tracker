@@ -209,7 +209,8 @@ def add_item():
     code   = request.form.get("item_code", "").strip() or None
     cat    = request.form.get("category", "lab_reagent")
     unit   = request.form.get("unit", "unit").strip() or "unit"
-    pack   = request.form.get("pack_size", "").strip()
+    pack          = request.form.get("pack_size", "").strip()
+    purchase_unit = request.form.get("purchase_unit", "").strip() or None
     price  = request.form.get("unit_price", "").strip()
     reorder= request.form.get("reorder_level", "").strip()
     notes  = request.form.get("notes", "").strip() or None
@@ -221,6 +222,7 @@ def add_item():
     item = InventoryItem(
         name=name, item_code=code, category=cat, unit=unit,
         pack_size=int(pack) if pack else None,
+        purchase_unit=purchase_unit,
         unit_price=float(price) if price else None,
         reorder_level=float(reorder) if reorder else None,
         notes=notes,
@@ -259,13 +261,15 @@ def edit_item(item_id):
     item.item_code= request.form.get("item_code", "").strip() or None
     item.category = request.form.get("category", item.category)
     item.unit     = request.form.get("unit", item.unit).strip() or item.unit
-    pack  = request.form.get("pack_size", "").strip()
+    pack          = request.form.get("pack_size", "").strip()
+    purchase_unit = request.form.get("purchase_unit", "").strip() or None
     price = request.form.get("unit_price", "").strip()
     reorder= request.form.get("reorder_level", "").strip()
-    item.pack_size    = int(pack) if pack else None
-    item.unit_price   = float(price) if price else None
-    item.reorder_level= float(reorder) if reorder else None
-    item.notes        = request.form.get("notes", "").strip() or None
+    item.pack_size     = int(pack) if pack else None
+    item.purchase_unit = purchase_unit
+    item.unit_price    = float(price) if price else None
+    item.reorder_level = float(reorder) if reorder else None
+    item.notes         = request.form.get("notes", "").strip() or None
     db.session.commit()
     flash(f"Item '{item.name}' updated.", "success")
     return redirect(url_for("inventory.item_detail", item_id=item_id))
@@ -469,17 +473,23 @@ def receive_stock():
             flash("Item and quantity are required.", "error")
             return redirect(url_for("inventory.receive_stock"))
 
-        expiry = _parse_date(expiry_s)
+        expiry    = _parse_date(expiry_s)
+        recv_item = InventoryItem.query.get(item_id)
+        use_packs = request.form.get("use_packs") == "1"
+        qty_f     = float(qty)
+        packs_note = ""
+        if use_packs and recv_item and recv_item.pack_size:
+            packs_note = f"{qty_f} {recv_item.purchase_unit or 'pack'}(s) × {recv_item.pack_size} = "
+            qty_f = qty_f * recv_item.pack_size
         _apply_txn(
             item_id=item_id, branch_id=branch_id,
-            txn_type="receive", qty=float(qty),
+            txn_type="receive", qty=qty_f,
             user_id=current_user.id,
             unit_cost=float(unit_cost) if unit_cost else None,
             batch=batch, expiry=expiry, notes=notes,
         )
         db.session.commit()
-        item = InventoryItem.query.get(item_id)
-        flash(f"Received {qty} {item.unit}(s) of '{item.name}'.", "success")
+        flash(f"Received {packs_note}{qty_f:g} {recv_item.unit if recv_item else ''}(s) of '{recv_item.name if recv_item else ''}'.", "success")
         return redirect(url_for("inventory.dashboard"))
 
     return render_template("inventory/receive.html",
@@ -1110,11 +1120,15 @@ def confirm_receipt(transit_id):
             return redirect(url_for("inventory.in_transit_list"))
 
     ref_label = transit.payment_request.reference if transit.payment_request else f"PR#{transit.payment_request_id}"
+    inv_item  = InventoryItem.query.get(transit.inventory_item_id)
+    recv_qty  = float(transit.qty)
+    if inv_item and inv_item.pack_size and recv_qty > 0:
+        recv_qty = recv_qty * inv_item.pack_size
     _apply_txn(
         item_id=transit.inventory_item_id,
         branch_id=transit.branch_id,
         txn_type="receive",
-        qty=float(transit.qty),
+        qty=recv_qty,
         user_id=current_user.id,
         reference=ref_label,
         notes=f"Confirmed receipt from purchase request {ref_label}",
@@ -1144,3 +1158,5 @@ def cancel_transit(transit_id):
     db.session.commit()
     flash("Transit entry cancelled.", "warning")
     return redirect(url_for("inventory.in_transit_list"))
+
+
