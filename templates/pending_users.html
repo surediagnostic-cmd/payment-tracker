@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Pending User Activations{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+  <div>
+    <h1 style="margin:0 0 4px; font-size:1.35rem; font-weight:700;">Pending Activations</h1>
+    <p style="margin:0; color:var(--muted); font-size:.875rem;">
+      Users submitted by accountants awaiting your activation
+    </p>
+  </div>
+  <a href="{{ url_for('admin.admin') }}" class="btn-outline" style="text-decoration:none;">
+    ← Admin Settings
+  </a>
+</div>
+
+{% if users %}
+<div class="kpi-card" style="padding:0; overflow:hidden;">
+  <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
+    <thead>
+      <tr style="background:var(--bg);">
+        <th style="padding:10px 16px; text-align:left; color:var(--muted); font-weight:500;">Name</th>
+        <th style="padding:10px 12px; text-align:left; color:var(--muted); font-weight:500;">Email</th>
+        <th style="padding:10px 12px; text-align:center; color:var(--muted); font-weight:500;">Role</th>
+        <th style="padding:10px 12px; text-align:left; color:var(--muted); font-weight:500;">Branches</th>
+        <th style="padding:10px 12px; text-align:center; color:var(--muted); font-weight:500;">Submitted</th>
+        <th style="padding:10px 16px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr style="border-top:1px solid var(--border);">
+        <td style="padding:12px 16px; font-weight:500;">{{ u.name }}</td>
+        <td style="padding:12px 12px; color:var(--muted);">{{ u.email }}</td>
+        <td style="padding:12px 12px; text-align:center;">
+          <span class="badge badge-blue" style="font-size:9px;">{{ u.role | upper }}</span>
+        </td>
+        <td style="padding:12px 12px; color:var(--muted); font-size:.82rem;">
+          {% if u.branches %}
+            {% for b in u.branches %}{{ b.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}—{% endif %}
+        </td>
+        <td style="padding:12px 12px; text-align:center; color:var(--muted); font-size:.82rem;">
+          {{ u.created_at.strftime('%d %b %Y') if u.created_at else '—' }}
+        </td>
+        <td style="padding:12px 16px; text-align:right; white-space:nowrap;">
+          <form method="POST" action="{{ url_for('admin.toggle_user', user_id=u.id) }}"
+                style="display:inline;">
+            <button type="submit" class="btn-primary" style="font-size:.8rem; padding:5px 14px;">
+              ✓ Activate
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="kpi-card" style="padding:48px; text-align:center; color:var(--muted);">
+  <p style="font-size:1.05rem; margin-bottom:6px;">No pending activations</p>
+  <p style="font-size:.875rem; margin:0;">All submitted user accounts have been activated.</p>
+</div>
+{% endif %}
+{% endblock %}
