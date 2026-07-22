@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Allocation Templates{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:8px;">
+  <a href="{{ url_for('revenue_share.index') }}" style="color:var(--muted); text-decoration:none; font-size:.875rem;">
+    ← Revenue Share
+  </a>
+</div>
+
+<div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+  <div>
+    <h1 style="margin:0 0 4px; font-size:1.35rem; font-weight:700;">Allocation Templates</h1>
+    <p style="margin:0; font-size:.875rem; color:var(--muted);">
+      Define the default % split per branch. These auto-load when creating a new weekly run.
+    </p>
+  </div>
+  <a href="{{ url_for('revenue_share.new_period') }}" class="btn-primary"
+     style="text-decoration:none; font-size:.85rem; padding:7px 16px; white-space:nowrap;">
+    + New Weekly Run
+  </a>
+</div>
+
+{% if not recipients %}
+<div class="kpi-card" style="padding:40px; text-align:center; color:var(--muted);">
+  <p style="margin:0 0 8px; font-size:1rem;">No active recipients yet.</p>
+  <a href="{{ url_for('revenue_share.recipients') }}" style="color:var(--orange);">
+    Add recipients first →
+  </a>
+</div>
+
+{% elif not branches %}
+<div class="kpi-card" style="padding:40px; text-align:center; color:var(--muted);">
+  <p style="margin:0;">No active branches found.</p>
+</div>
+
+{% else %}
+
+{# Branch selector tabs #}
+<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px;">
+  {% for br in branches %}
+  <button type="button"
+          onclick="selectBranch({{ br.id }})"
+          id="br-tab-{{ br.id }}"
+          style="padding:7px 16px; border-radius:9px; border:1px solid var(--border);
+                 font-size:.875rem; cursor:pointer; transition:all .15s;
+                 background:{{ 'var(--orange)' if loop.first else 'var(--card)' }};
+                 color:{{ '#fff' if loop.first else 'var(--text)' }};
+                 font-weight:{{ '600' if loop.first else '400' }};">
+    {{ br.name }}
+  </button>
+  {% endfor %}
+</div>
+
+{# Branch panels #}
+{% for br in branches %}
+<div id="br-panel-{{ br.id }}" style="{{ '' if loop.first else 'display:none' }}">
+
+  <div class="kpi-card" style="padding:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+      <h3 style="margin:0; font-size:.95rem; font-weight:600;">{{ br.name }}</h3>
+      <div style="font-size:.875rem; color:var(--muted);">
+        Total: <span id="total-{{ br.id }}"
+          style="font-weight:700; color:var(--orange);">{{ '%.1f'|format(branches|selectattr('id','eq',br.id)|map(attribute='id')|list|length) }}%</span>
+        &nbsp;
+        <span id="status-{{ br.id }}" style="font-size:.8rem;"></span>
+      </div>
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">Recipient / Fund Pool</th>
+          <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">Bank Account</th>
+          <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500; width:120px;">% Allocation</th>
+          <th style="padding:6px 8px; border-bottom:1px solid var(--border); width:60px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rec in recipients %}
+        <tr style="border-top:1px solid var(--border);">
+          <td style="padding:9px 8px; font-weight:500;">{{ rec.name }}</td>
+          <td style="padding:9px 8px; color:var(--muted); font-size:.82rem;">
+            {{ rec.bank_name or '—' }}
+            {% if rec.account_number %} · {{ rec.account_number }}{% endif %}
+          </td>
+          <td style="padding:9px 8px; text-align:right;">
+            <input type="number"
+                   id="tpl-{{ br.id }}-{{ rec.id }}"
+                   class="inp tpl-pct"
+                   step="0.01" min="0" max="100" placeholder="0"
+                   value="{{ tpl_map.get((br.id, rec.id), '')|string if tpl_map.get((br.id, rec.id)) else '' }}"
+                   data-branch="{{ br.id }}"
+                   data-recipient="{{ rec.id }}"
+                   style="width:80px; text-align:right; padding:4px 6px;"
+                   oninput="recomputeTotal({{ br.id }})"
+                   onblur="saveTpl({{ br.id }}, {{ rec.id }})">
+          </td>
+          <td style="padding:9px 8px; text-align:center;">
+            <span id="save-{{ br.id }}-{{ rec.id }}" style="font-size:.8rem; color:var(--muted);"></span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2" style="padding:10px 8px; font-size:.82rem; color:var(--muted);">
+            Entries auto-save on blur. Total should equal 100%.
+          </td>
+          <td style="padding:10px 8px; text-align:right; font-weight:700; font-size:.95rem;">
+            <span id="total-foot-{{ br.id }}">—</span>%
+          </td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+</div>
+{% endfor %}
+
+{% endif %}
+
+<script>
+const SAVE_URL = "{{ url_for('revenue_share.save_template') }}";
+
+let activeBrId = {{ branches[0].id if branches else 'null' }};
+
+function selectBranch(brId) {
+  // Hide all panels, deactivate all tabs
+  document.querySelectorAll('[id^="br-panel-"]').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('[id^="br-tab-"]').forEach(t => {
+    t.style.background = 'var(--card)';
+    t.style.color      = 'var(--text)';
+    t.style.fontWeight = '400';
+  });
+  document.getElementById('br-panel-' + brId).style.display = '';
+  const tab = document.getElementById('br-tab-' + brId);
+  tab.style.background = 'var(--orange)';
+  tab.style.color      = '#fff';
+  tab.style.fontWeight = '600';
+  activeBrId = brId;
+  recomputeTotal(brId);
+}
+
+function recomputeTotal(brId) {
+  let total = 0;
+  document.querySelectorAll(`[id^="tpl-${brId}-"]`).forEach(inp => {
+    total += parseFloat(inp.value || 0);
+  });
+  const el     = document.getElementById('total-' + brId);
+  const footEl = document.getElementById('total-foot-' + brId);
+  const colour = Math.abs(total - 100) < 0.01
+    ? 'var(--green)' : total > 100 ? 'var(--red)' : 'var(--orange)';
+  if (el) { el.textContent = total.toFixed(1) + '%'; el.style.color = colour; }
+  if (footEl) { footEl.textContent = total.toFixed(1); footEl.style.color = colour; }
+}
+
+function saveTpl(brId, recId) {
+  const inp = document.getElementById(`tpl-${brId}-${recId}`);
+  if (!inp) return;
+  const pct     = inp.value.trim() || '0';
+  const statusEl = document.getElementById(`save-${brId}-${recId}`);
+  if (statusEl) { statusEl.textContent = '…'; statusEl.style.color = 'var(--muted)'; }
+
+  const fd = new FormData();
+  fd.append('branch_id',    brId);
+  fd.append('recipient_id', recId);
+  fd.append('percentage',   pct);
+
+  fetch(SAVE_URL, { method:'POST', body:fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        if (statusEl) { statusEl.textContent = '✓'; statusEl.style.color = 'var(--green)'; }
+        recomputeTotal(brId);
+        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000);
+      } else {
+        if (statusEl) { statusEl.textContent = '✗'; statusEl.style.color = 'var(--red)'; }
+        alert('Save failed: ' + (d.error || 'unknown error'));
+      }
+    })
+    .catch(() => {
+      if (statusEl) { statusEl.textContent = '✗'; statusEl.style.color = 'var(--red)'; }
+    });
+}
+
+// Init totals on load
+document.addEventListener('DOMContentLoaded', () => {
+  {% for br in branches %}
+  recomputeTotal({{ br.id }});
+  {% endfor %}
+});
+</script>
+{% endblock %}
