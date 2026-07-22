@@ -17,10 +17,22 @@ revenue_share_bp = Blueprint("revenue_share", __name__, url_prefix="/revenue-sha
 
 
 def _mds_required(f):
+    """MDS only — used for finalise (creates payment requests)."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated or not current_user.is_mds:
             flash("MDS access required.", "error")
+            return redirect(url_for("requests.dashboard"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _finance_required(f):
+    """MDS + Accountant — can view/edit revenue share data."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role not in ("mds", "accountant"):
+            flash("Access restricted.", "error")
             return redirect(url_for("requests.dashboard"))
         return f(*args, **kwargs)
     return decorated
@@ -55,7 +67,7 @@ def _total_amount(period_id):
 
 @revenue_share_bp.route("/")
 @login_required
-@_mds_required
+@_finance_required
 def index():
     periods  = RevenueSharePeriod.query.order_by(RevenueSharePeriod.created_at.desc()).all()
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
@@ -115,7 +127,7 @@ def index():
 
 @revenue_share_bp.route("/periods/new", methods=["GET", "POST"])
 @login_required
-@_mds_required
+@_finance_required
 def new_period():
     branches   = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     recipients = RevenueShareRecipient.query.filter_by(is_active=True).order_by(
@@ -185,7 +197,7 @@ def new_period():
 
 @revenue_share_bp.route("/periods/<int:period_id>")
 @login_required
-@_mds_required
+@_finance_required
 def period_detail(period_id):
     period     = RevenueSharePeriod.query.get_or_404(period_id)
     branches   = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
@@ -202,7 +214,7 @@ def period_detail(period_id):
 
 @revenue_share_bp.route("/periods/<int:period_id>/save-allocation", methods=["POST"])
 @login_required
-@_mds_required
+@_finance_required
 def save_allocation(period_id):
     """AJAX upsert/remove one allocation."""
     try:
@@ -258,7 +270,7 @@ def save_allocation(period_id):
 
 @revenue_share_bp.route("/periods/<int:period_id>/update", methods=["POST"])
 @login_required
-@_mds_required
+@_finance_required
 def update_period(period_id):
     """AJAX update period header fields + recalculate allocations."""
     try:
@@ -361,7 +373,7 @@ def finalise_period(period_id):
 
 @revenue_share_bp.route("/periods/<int:period_id>/allocations/<int:alloc_id>/toggle-paid", methods=["POST"])
 @login_required
-@_mds_required
+@_finance_required
 def toggle_paid(period_id, alloc_id):
     try:
         alloc = RevenueShareAllocation.query.get_or_404(alloc_id)
@@ -380,7 +392,7 @@ def toggle_paid(period_id, alloc_id):
 
 @revenue_share_bp.route("/recipients")
 @login_required
-@_mds_required
+@_finance_required
 def recipients():
     recs = RevenueShareRecipient.query.order_by(
         RevenueShareRecipient.is_active.desc(), RevenueShareRecipient.name
@@ -390,7 +402,7 @@ def recipients():
 
 @revenue_share_bp.route("/recipients/save", methods=["POST"])
 @login_required
-@_mds_required
+@_finance_required
 def save_recipient():
     try:
         rec_id = request.form.get("id", "").strip()
@@ -429,7 +441,7 @@ def save_recipient():
 
 @revenue_share_bp.route("/recipients/<int:rec_id>/delete", methods=["POST"])
 @login_required
-@_mds_required
+@_finance_required
 def delete_recipient(rec_id):
     try:
         rec = RevenueShareRecipient.query.get_or_404(rec_id)
