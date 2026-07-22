@@ -86,8 +86,7 @@ def create_app():
     def internal_error(error):
         import traceback
         tb = traceback.format_exc()
-        print(f"[500 ERROR]
-{tb}", flush=True)
+        print(f"[500 ERROR]\n{tb}", flush=True)
         try:
             db.session.rollback()
         except Exception:
@@ -99,9 +98,7 @@ def create_app():
             return (
                 f"<pre style='padding:20px;background:#0b1e3d;color:#ff9d45;"
                 f"font-family:monospace;font-size:13px;min-height:100vh;margin:0;'>"
-                f"500 Internal Server Error
-
-{tb}</pre>"
+                f"500 Internal Server Error\n\n{tb}</pre>"
             ), 500
 
     with app.app_context():
