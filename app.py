@@ -60,6 +60,7 @@ def create_app():
     from routes.admin import admin_bp
     from routes.budget import budget_bp
     from routes.inventory import inventory_bp
+    from routes.revenue_share import revenue_share_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(requests_bp)
@@ -68,6 +69,7 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(budget_bp)
     app.register_blueprint(inventory_bp)
+    app.register_blueprint(revenue_share_bp)
 
     @app.route("/")
     def root():
