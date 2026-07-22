@@ -693,6 +693,161 @@ def bulk_upload():
     return render_template("bulk_upload.html", user_branches=user_branches)
 
 
+
+@requests_bp.route("/requests/<int:req_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_request(req_id):
+    pr = _eager_pr().filter_by(id=req_id).first_or_404()
+
+    # Only the submitter can edit; MDS cannot; request must still be pending
+    if current_user.is_mds:
+        flash("MDS accounts cannot edit payment requests.", "error")
+        return redirect(url_for("requests.view_request", req_id=req_id))
+    if pr.submitted_by != current_user.id:
+        flash("You can only edit your own requests.", "error")
+        return redirect(url_for("requests.dashboard"))
+    if pr.status != "pending":
+        flash("Only pending (not yet reviewed) requests can be edited.", "error")
+        return redirect(url_for("requests.view_request", req_id=req_id))
+
+    categories      = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    inventory_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+    user_branch_list = current_user.branches
+
+    if request.method == "POST":
+        try:
+            import json as _json
+
+            branch_id = int(request.form["branch_id"])
+            if branch_id not in [b.id for b in current_user.branches]:
+                flash("Invalid branch selection.", "error")
+                return redirect(url_for("requests.edit_request", req_id=req_id))
+
+            items_json_str = request.form.get("items_json", "").strip()
+            if not items_json_str:
+                flash("Item data is missing. Please try again.", "error")
+                return redirect(url_for("requests.edit_request", req_id=req_id))
+
+            items_tree = _json.loads(items_json_str)
+            if not items_tree:
+                flash("At least one line item is required.", "error")
+                return redirect(url_for("requests.edit_request", req_id=req_id))
+
+            # Recalculate total (leaf items only)
+            total = Decimal(0)
+            for it in items_tree:
+                children = it.get("children") or []
+                if children:
+                    for ch in children:
+                        try:
+                            total += int(str(ch.get("quantity") or 1)) * Decimal(str(ch.get("rate") or 0).replace(",", ""))
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        total += int(str(it.get("quantity") or 1)) * Decimal(str(it.get("rate") or 0).replace(",", ""))
+                    except Exception:
+                        pass
+
+            # Update header
+            pr.date               = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
+            pr.branch_id          = branch_id
+            pr.beneficiary_name   = request.form["beneficiary_name"].strip()
+            pr.beneficiary_account= request.form["beneficiary_account"].strip()
+            pr.beneficiary_bank   = request.form["beneficiary_bank"].strip()
+            pr.bank_code          = request.form.get("bank_code", "").strip()
+            pr.requested_amount   = total
+
+            # Replace all items
+            for old in list(pr.items):
+                db.session.delete(old)
+            db.session.flush()
+
+            for it in items_tree:
+                desc = (it.get("description") or "").strip()
+                if not desc:
+                    continue
+                children_data = it.get("children") or []
+                has_children  = bool(children_data)
+
+                p_qty    = 1 if has_children else int(str(it.get("quantity") or 1))
+                p_rate   = Decimal(0) if has_children else Decimal(str(it.get("rate") or 0).replace(",", ""))
+                p_amount = Decimal(0) if has_children else p_qty * p_rate
+
+                inv_item_id = it.get("inventory_item_id")
+                qty_ord     = it.get("qty_ordered")
+                parent_item = PaymentRequestItem(
+                    request_id=pr.id, parent_id=None,
+                    description=desc,
+                    category_id=int(it["category_id"]),
+                    quantity=p_qty, rate=p_rate, amount=p_amount,
+                    notes=(it.get("notes") or "").strip() or None,
+                    inventory_item_id=int(inv_item_id) if inv_item_id else None,
+                    qty_ordered=Decimal(str(qty_ord)) if qty_ord else None,
+                )
+                db.session.add(parent_item)
+                db.session.flush()
+
+                for ch in children_data:
+                    cdesc = (ch.get("description") or "").strip()
+                    if not cdesc:
+                        continue
+                    cqty    = int(str(ch.get("quantity") or 1))
+                    crate   = Decimal(str(ch.get("rate") or 0).replace(",", ""))
+                    c_inv   = ch.get("inventory_item_id")
+                    c_qord  = ch.get("qty_ordered")
+                    db.session.add(PaymentRequestItem(
+                        request_id=pr.id, parent_id=parent_item.id,
+                        description=cdesc,
+                        category_id=int(ch["category_id"]),
+                        quantity=cqty, rate=crate, amount=cqty * crate,
+                        notes=(ch.get("notes") or "").strip() or None,
+                        inventory_item_id=int(c_inv) if c_inv else None,
+                        qty_ordered=Decimal(str(c_qord)) if c_qord else None,
+                    ))
+
+            db.session.commit()
+            flash(f"Request {pr.reference} updated successfully.", "success")
+            return redirect(url_for("requests.view_request", req_id=req_id))
+
+        except Exception as e:
+            try: db.session.rollback()
+            except Exception: pass
+            flash(f"Error updating request: {str(e)}", "error")
+
+    # Build existing items JSON for JS pre-population
+    import json as _json
+    top_items = sorted([i for i in pr.items if not i.parent_id], key=lambda x: x.id)
+    existing_items = []
+    for item in top_items:
+        children = sorted([ch for ch in pr.items if ch.parent_id == item.id], key=lambda x: x.id)
+        existing_items.append({
+            "description":       item.description,
+            "category_id":       str(item.category_id),
+            "quantity":          int(item.quantity or 1),
+            "rate":              str(item.rate or 0),
+            "notes":             item.notes or "",
+            "inventory_item_id": str(item.inventory_item_id) if item.inventory_item_id else "",
+            "qty_ordered":       str(item.qty_ordered) if item.qty_ordered else "",
+            "children": [{
+                "description":       ch.description,
+                "category_id":       str(ch.category_id),
+                "quantity":          int(ch.quantity or 1),
+                "rate":              str(ch.rate or 0),
+                "notes":             ch.notes or "",
+                "inventory_item_id": str(ch.inventory_item_id) if ch.inventory_item_id else "",
+                "qty_ordered":       str(ch.qty_ordered) if ch.qty_ordered else "",
+            } for ch in children],
+        })
+
+    return render_template("new_request.html",
+                           categories=categories,
+                           user_branches=user_branch_list,
+                           inventory_items=inventory_items,
+                           edit_mode=True, pr=pr,
+                           existing_items_json=_json.dumps(existing_items))
+
+
 @requests_bp.route("/requests/<int:req_id>/delete", methods=["POST"])
 @login_required
 def delete_request(req_id):
@@ -738,3 +893,5 @@ def list_requests():
         requests=requests_list, branches=branches,
         filters={"branch_id": branch_id, "month": month, "status": status},
     )
+
+
