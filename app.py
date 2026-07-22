@@ -86,7 +86,8 @@ def create_app():
     def internal_error(error):
         import traceback
         tb = traceback.format_exc()
-        print(f"[500 ERROR]\n{tb}", flush=True)
+        print(f"[500 ERROR]
+{tb}", flush=True)
         try:
             db.session.rollback()
         except Exception:
@@ -98,7 +99,9 @@ def create_app():
             return (
                 f"<pre style='padding:20px;background:#0b1e3d;color:#ff9d45;"
                 f"font-family:monospace;font-size:13px;min-height:100vh;margin:0;'>"
-                f"500 Internal Server Error\n\n{tb}</pre>"
+                f"500 Internal Server Error
+
+{tb}</pre>"
             ), 500
 
     with app.app_context():
@@ -319,6 +322,27 @@ def _run_migrations():
         except Exception as e:
             db.session.rollback()
             print(f"[migration] budgets table: {e}")
+
+
+    # 7. branch_allocation_templates (Revenue Share templates)
+    if 'branch_allocation_templates' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE branch_allocation_templates (
+                    id           SERIAL PRIMARY KEY,
+                    branch_id    INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                    recipient_id INTEGER NOT NULL REFERENCES revenue_share_recipients(id) ON DELETE CASCADE,
+                    percentage   NUMERIC(6,3) NOT NULL DEFAULT 0,
+                    updated_at   TIMESTAMP DEFAULT NOW(),
+                    updated_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    CONSTRAINT uq_bat_branch_recipient UNIQUE (branch_id, recipient_id)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created branch_allocation_templates table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] branch_allocation_templates: {e}")
 
 
 def _seed_defaults():
@@ -553,3 +577,5 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+
