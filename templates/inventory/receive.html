@@ -26,16 +26,43 @@
 
   <div class="card" style="padding:28px;">
     <form method="post" action="{{ url_for('inventory.receive_stock') }}">
+      <input type="hidden" name="use_packs" id="use-packs-flag" value="0">
+
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
 
         <div style="grid-column:1/-1;">
           <label class="label">Item *</label>
-          <select name="item_id" class="inp" required>
+          <select name="item_id" id="item-sel" class="inp" required onchange="onItemChange()">
             <option value="">— select item —</option>
             {% for item in all_items %}
-            <option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>
+            <option value="{{ item.id }}"
+                    data-unit="{{ item.unit }}"
+                    data-pack-size="{{ item.pack_size or '' }}"
+                    data-purchase-unit="{{ item.purchase_unit or 'Pack' }}">
+              {{ item.name }} ({{ item.unit }}){% if item.pack_size %} · {{ item.purchase_unit or 'Pack' }} of {{ item.pack_size }}{% endif %}
+            </option>
             {% endfor %}
           </select>
+
+          {# Pack info banner — hidden until item with pack_size selected #}
+          <div id="pack-info" style="display:none; margin-top:10px; padding:10px 14px;
+               border-radius:9px; border:1px solid var(--border); background:var(--bg);
+               font-size:.85rem; display:none; align-items:center; justify-content:space-between;
+               flex-wrap:wrap; gap:10px;">
+            <div>
+              <span style="color:var(--muted);">Pack type:</span>
+              <strong id="pi-pu"></strong>
+              &nbsp;·&nbsp;
+              <span style="color:var(--muted);">Units per pack:</span>
+              <strong id="pi-ps"></strong>
+              <span id="pi-unit" style="color:var(--muted);"></span>
+            </div>
+            <label style="display:flex; align-items:center; gap:7px; cursor:pointer; font-size:.85rem;">
+              <input type="checkbox" id="packs-toggle" onchange="togglePackMode(this)"
+                     style="width:15px; height:15px; accent-color:var(--orange);">
+              Enter quantity in <strong id="pi-pu2">packs</strong>
+            </label>
+          </div>
         </div>
 
         <div>
@@ -49,12 +76,22 @@
         </div>
 
         <div>
-          <label class="label">Quantity Received *</label>
-          <input name="qty" class="inp" type="number" step="0.01" min="0.01" required placeholder="e.g. 100">
+          <label class="label" id="qty-label">Quantity Received *</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input name="qty" id="qty-inp" class="inp" type="number" step="0.01"
+                   min="0.01" required placeholder="e.g. 2"
+                   style="flex:1;" oninput="updateCalc()">
+            <span id="qty-unit-badge" style="font-size:.8rem; color:var(--muted); white-space:nowrap;"></span>
+          </div>
+          {# Calculation preview #}
+          <div id="qty-calc" style="display:none; margin-top:6px; font-size:.82rem;
+               padding:6px 10px; border-radius:7px; background:rgba(245,130,31,.08);
+               border:1px solid rgba(245,130,31,.2); color:var(--orange);">
+          </div>
         </div>
 
         <div>
-          <label class="label">Unit Cost (₦ per unit)</label>
+          <label class="label">Unit Cost (₦ per <span id="cost-unit-label">unit</span>)</label>
           <input name="unit_cost" class="inp" type="number" step="0.01" placeholder="e.g. 80.00">
         </div>
 
@@ -111,4 +148,79 @@
     </form>
   </div>
 </div>
+
+<script>
+let packMode = false;
+let currentPackSize = 0;
+let currentUnit = '';
+let currentPurchaseUnit = '';
+
+function onItemChange() {
+  const sel  = document.getElementById('item-sel');
+  const opt  = sel.options[sel.selectedIndex];
+  const ps   = parseInt(opt.dataset.packSize || '0');
+  const unit = opt.dataset.unit || '';
+  const pu   = opt.dataset.purchaseUnit || 'Pack';
+
+  currentPackSize    = ps;
+  currentUnit        = unit;
+  currentPurchaseUnit = pu;
+
+  const infoEl = document.getElementById('pack-info');
+
+  if (ps > 0) {
+    document.getElementById('pi-pu').textContent  = pu;
+    document.getElementById('pi-pu2').textContent = pu + 's';
+    document.getElementById('pi-ps').textContent  = ps;
+    document.getElementById('pi-unit').textContent = ' ' + unit + '/pack';
+    infoEl.style.display = 'flex';
+  } else {
+    infoEl.style.display = 'none';
+    // Reset to standard mode
+    packMode = false;
+    document.getElementById('packs-toggle').checked = false;
+    document.getElementById('use-packs-flag').value = '0';
+  }
+
+  // Reset pack toggle on item change
+  if (document.getElementById('packs-toggle').checked) {
+    document.getElementById('packs-toggle').checked = false;
+    togglePackMode(document.getElementById('packs-toggle'));
+  }
+  updateCalc();
+}
+
+function togglePackMode(cb) {
+  packMode = cb.checked;
+  document.getElementById('use-packs-flag').value = packMode ? '1' : '0';
+
+  const qtyLabel    = document.getElementById('qty-label');
+  const qtyBadge    = document.getElementById('qty-unit-badge');
+  const costLabel   = document.getElementById('cost-unit-label');
+
+  if (packMode && currentPackSize > 0) {
+    qtyLabel.textContent = `Quantity Received (${currentPurchaseUnit}s) *`;
+    qtyBadge.textContent = currentPurchaseUnit + '(s)';
+    costLabel.textContent = currentPurchaseUnit.toLowerCase();
+  } else {
+    qtyLabel.textContent = 'Quantity Received *';
+    qtyBadge.textContent = currentUnit ? currentUnit + '(s)' : '';
+    costLabel.textContent = 'unit';
+  }
+  updateCalc();
+}
+
+function updateCalc() {
+  const calcEl = document.getElementById('qty-calc');
+  const qtyVal = parseFloat(document.getElementById('qty-inp').value || 0);
+
+  if (packMode && currentPackSize > 0 && qtyVal > 0) {
+    const total = qtyVal * currentPackSize;
+    calcEl.style.display = '';
+    calcEl.textContent = `${qtyVal} ${currentPurchaseUnit}(s) × ${currentPackSize} ${currentUnit}/pack = ${total.toLocaleString()} ${currentUnit}s added to stock`;
+  } else {
+    calcEl.style.display = 'none';
+  }
+}
+</script>
 {% endblock %}
