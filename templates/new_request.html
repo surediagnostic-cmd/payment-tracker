@@ -5,11 +5,11 @@
 <div style="max-width:860px;">
   <div style="margin-bottom:28px;">
     <a href="{{ url_for('requests.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none; font-weight:500;">← Back to Dashboard</a>
-    <div class="section-title" style="margin-top:8px;">New Payment Request</div>
-    <div style="font-size:13px; color:var(--muted); margin-top:4px;">{{ current_user.name }}</div>
+    <div class="section-title" style="margin-top:8px;">{% if edit_mode %}Edit Request — {{ pr.reference }}{% else %}New Payment Request{% endif %}</div>
+    <div style="font-size:13px; color:var(--muted); margin-top:4px;">{% if edit_mode %}Pending · {{ pr.branch.name }}{% else %}{{ current_user.name }}{% endif %}</div>
   </div>
 
-  <form method="POST" action="{{ url_for('requests.new_request') }}" id="prForm">
+  <form method="POST" action="{% if edit_mode %}{{ url_for('requests.edit_request', req_id=pr.id) }}{% else %}{{ url_for('requests.new_request') }}{% endif %}" id="prForm">
     <!-- Items serialized as JSON on submit -->
     <input type="hidden" id="items_json" name="items_json" value="">
 
@@ -19,7 +19,7 @@
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
         <div>
           <label class="label">Payment Date *</label>
-          <input type="date" name="date" class="inp" required id="dateField"/>
+          <input type="date" name="date" class="inp" required id="dateField" {% if edit_mode %}value="{{ pr.date.isoformat() }}"{% endif %}/>
         </div>
         <div>
           <label class="label">Branch *</label>
@@ -30,7 +30,7 @@
             <select name="branch_id" class="inp" required>
               <option value="">— Select branch —</option>
               {% for b in user_branches %}
-              <option value="{{ b.id }}">{{ b.name }}</option>
+              <option value="{{ b.id }}" {% if edit_mode and b.id == pr.branch_id %}selected{% endif %}>{{ b.name }}</option>
               {% endfor %}
             </select>
           {% endif %}
@@ -136,33 +136,33 @@
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
         <div>
           <label class="label">Beneficiary Name *</label>
-          <input type="text" name="beneficiary_name" class="inp" placeholder="Full name or company" required/>
+          <input type="text" name="beneficiary_name" class="inp" placeholder="Full name or company" required value="{% if edit_mode %}{{ pr.beneficiary_name }}{% endif %}"/>
         </div>
         <div>
           <label class="label">Account Number *</label>
-          <input type="text" name="beneficiary_account" class="inp" placeholder="0123456789" required maxlength="20"/>
+          <input type="text" name="beneficiary_account" class="inp" placeholder="0123456789" required maxlength="20" value="{% if edit_mode %}{{ pr.beneficiary_account }}{% endif %}"/>
         </div>
         <div>
           <label class="label">Beneficiary Bank *</label>
           <select name="beneficiary_bank" class="inp" required>
             <option value="">— Select bank —</option>
             {% for bank in ["Access Bank","Ecobank","Fidelity Bank","FCMB","First Bank","GTBank","Heritage Bank","Keystone Bank","Kuda","Moniepoint","OPay","Palmpay","Polaris Bank","Providus Bank","Stanbic IBTC","Sterling Bank","UBA","Union Bank","Unity Bank","Wema Bank","Zenith Bank","Other"] %}
-            <option value="{{ bank }}">{{ bank }}</option>
+            <option value="{{ bank }}" {% if edit_mode and pr.beneficiary_bank == bank %}selected{% endif %}>{{ bank }}</option>
             {% endfor %}
           </select>
         </div>
         <div>
           <label class="label">Bank Code <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional)</span></label>
-          <input type="text" name="bank_code" class="inp" placeholder="e.g. 058" maxlength="10"/>
+          <input type="text" name="bank_code" class="inp" placeholder="e.g. 058" maxlength="10" value="{% if edit_mode %}{{ pr.bank_code or '' }}{% endif %}"/>
         </div>
       </div>
     </div>
 
     <div style="display:flex; gap:12px; justify-content:flex-end;">
-      <a href="{{ url_for('requests.dashboard') }}" class="btn-outline">Cancel</a>
+      <a href="{% if edit_mode %}{{ url_for('requests.view_request', req_id=pr.id) }}{% else %}{{ url_for('requests.dashboard') }}{% endif %}" class="btn-outline">Cancel</a>
       <button type="submit" class="btn-primary" style="padding:12px 28px; font-size:15px;">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        Submit for Approval
+        {% if edit_mode %}Save Changes{% else %}Submit for Approval{% endif %}
       </button>
     </div>
   </form>
@@ -176,7 +176,7 @@ const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}"
 const inventoryOptions = `<option value="">— none —</option>{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}</option>{% endfor %}`;
 
 let uidSeq = 1; // 0 is used by the static first row
-document.getElementById('dateField').value = new Date().toISOString().split('T')[0];
+{% if not edit_mode %}document.getElementById('dateField').value = new Date().toISOString().split('T')[0];{% endif %}
 
 function genUid() { return uidSeq++; }
 
@@ -523,7 +523,72 @@ document.getElementById('prForm').addEventListener('submit', function(e) {
   document.getElementById('items_json').value = JSON.stringify(items);
 });
 
+
+// ── Edit mode: pre-populate items ───────────────────────────────────────────
+function loadExistingItems(items) {
+  document.getElementById('itemsContainer').innerHTML = '';
+  uidSeq = 0;
+  items.forEach(item => {
+    const uid = genUid();
+    document.getElementById('itemsContainer').insertAdjacentHTML('beforeend', parentRowHtml(uid));
+    const row = document.querySelector(`#itemsContainer > .item-row[data-uid="${uid}"]`);
+    row.querySelector('[data-field="description"]').value = item.description || '';
+    const catSel = row.querySelector('[data-field="category_id"]');
+    if (catSel) catSel.value = item.category_id || '';
+    const qtyInp = row.querySelector('.qty-input');
+    const rateInp = row.querySelector('.rate-input');
+    if (!item.children || !item.children.length) {
+      if (qtyInp) { qtyInp.value = item.quantity || 1; qtyInp.dataset.savedVal = item.quantity || 1; }
+      if (rateInp) { rateInp.value = item.rate || ''; rateInp.dataset.savedVal = item.rate || ''; }
+      onRowInput(row);
+    }
+    const notesInp = row.querySelector('[data-field="notes"]');
+    if (notesInp) notesInp.value = item.notes || '';
+    if (item.inventory_item_id) {
+      const panel = row.querySelector('[data-inv-panel]');
+      if (panel) panel.style.display = '';
+      const invSel = row.querySelector('[data-field="inventory_item_id"]');
+      if (invSel) invSel.value = item.inventory_item_id;
+      const qOrd = row.querySelector('[data-field="qty_ordered"]');
+      if (qOrd && item.qty_ordered) qOrd.value = item.qty_ordered;
+    }
+    (item.children || []).forEach(ch => {
+      const cuid = genUid();
+      const cont = document.querySelector(`.sub-items[data-for="${uid}"]`);
+      cont.insertAdjacentHTML('beforeend', subItemHtml(uid, cuid));
+      const crow = document.querySelector(`.item-row[data-uid="${cuid}"][data-parent="${uid}"]`);
+      crow.querySelector('[data-field="description"]').value = ch.description || '';
+      const ccatSel = crow.querySelector('[data-field="category_id"]');
+      if (ccatSel) ccatSel.value = ch.category_id || '';
+      const cqInp = crow.querySelector('.qty-input');
+      const crInp = crow.querySelector('.rate-input');
+      if (cqInp) { cqInp.value = ch.quantity || 1; cqInp.dataset.savedVal = ch.quantity || 1; }
+      if (crInp) { crInp.value = ch.rate || ''; crInp.dataset.savedVal = ch.rate || ''; }
+      const cnotes = crow.querySelector('[data-field="notes"]');
+      if (cnotes) cnotes.value = ch.notes || '';
+      if (ch.inventory_item_id) {
+        const cp = crow.querySelector('[data-inv-panel]');
+        if (cp) cp.style.display = '';
+        const cs = crow.querySelector('[data-field="inventory_item_id"]');
+        if (cs) cs.value = ch.inventory_item_id;
+        const cq = crow.querySelector('[data-field="qty_ordered"]');
+        if (cq && ch.qty_ordered) cq.value = ch.qty_ordered;
+      }
+      onRowInput(crow);
+    });
+    if (item.children && item.children.length) refreshParentState(uid);
+  });
+  updateRemoveButtons();
+  calcGrandTotal();
+}
+
+{% if edit_mode and existing_items_json %}
+loadExistingItems({{ existing_items_json | safe }});
+{% endif %}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 updateRemoveButtons();
 </script>
 {% endblock %}
+
+
