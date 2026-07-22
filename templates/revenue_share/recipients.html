@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Revenue Share Recipients{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 style="margin:0; font-size:1.35rem; font-weight:700;">Recipients</h1>
+    <p style="margin:4px 0 0; color:var(--muted); font-size:.875rem;">
+      Manage revenue share recipient bank accounts
+    </p>
+  </div>
+  <div style="display:flex; gap:10px;">
+    <a href="{{ url_for('revenue_share.index') }}" class="btn-outline" style="text-decoration:none;">
+      ← Back to Revenue Share
+    </a>
+    <button class="btn-primary" onclick="openModal()">+ Add Recipient</button>
+  </div>
+</div>
+
+<div class="kpi-card" style="padding:0; overflow:hidden;">
+  {% if recipients %}
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
+      <thead>
+        <tr style="background:var(--bg);">
+          <th style="padding:10px 16px; text-align:left; color:var(--muted); font-weight:500;">Name</th>
+          <th style="padding:10px 12px; text-align:left; color:var(--muted); font-weight:500;">Account Name</th>
+          <th style="padding:10px 12px; text-align:left; color:var(--muted); font-weight:500;">Account No.</th>
+          <th style="padding:10px 12px; text-align:left; color:var(--muted); font-weight:500;">Bank</th>
+          <th style="padding:10px 12px; text-align:center; color:var(--muted); font-weight:500;">Status</th>
+          <th style="padding:10px 16px;"></th>
+        </tr>
+      </thead>
+      <tbody id="rec-tbody">
+        {% for rec in recipients %}
+        <tr id="rec-row-{{ rec.id }}" style="border-top:1px solid var(--border);">
+          <td style="padding:12px 16px; font-weight:500;">{{ rec.name }}</td>
+          <td style="padding:12px 12px; color:var(--muted);">{{ rec.account_name or '—' }}</td>
+          <td style="padding:12px 12px; font-family:monospace; letter-spacing:.04em;">
+            {{ rec.account_number or '—' }}
+          </td>
+          <td style="padding:12px 12px; color:var(--muted);">{{ rec.bank_name or '—' }}</td>
+          <td style="padding:12px 12px; text-align:center;">
+            {% if rec.is_active %}
+              <span class="badge" style="background:rgba(0,200,100,.12); color:var(--green);">Active</span>
+            {% else %}
+              <span class="badge" style="background:rgba(150,150,150,.15); color:var(--muted);">Inactive</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px; text-align:right; white-space:nowrap;">
+            <button class="btn-outline" style="font-size:.8rem; padding:4px 10px; margin-right:6px;"
+                    onclick="openModal({{ rec.id }}, {{ rec.name|tojson }}, {{ (rec.account_name or '')|tojson }},
+                             {{ (rec.account_number or '')|tojson }}, {{ (rec.bank_name or '')|tojson }},
+                             {{ (rec.description or '')|tojson }}, {{ 1 if rec.is_active else 0 }})">
+              Edit
+            </button>
+            <button class="btn-danger" style="font-size:.8rem; padding:4px 10px;"
+                    onclick="deleteRec({{ rec.id }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:40px; text-align:center; color:var(--muted);">
+    <p style="font-size:1.1rem; margin-bottom:8px;">No recipients yet</p>
+    <p style="font-size:.9rem; margin:0;">
+      <button class="btn-primary" onclick="openModal()">Add the first recipient</button>
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Add / Edit Modal ─────────────────────────────────────────────────────── #}
+<div id="rec-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5);
+     z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:var(--card); border-radius:12px; padding:28px; width:100%; max-width:480px;
+              margin:auto; box-shadow:0 8px 40px rgba(0,0,0,.3);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <h3 id="modal-title" style="margin:0; font-size:1.05rem; font-weight:700;">Add Recipient</h3>
+      <button onclick="closeModal()"
+              style="background:none; border:none; color:var(--muted); font-size:1.3rem; cursor:pointer;">×</button>
+    </div>
+
+    <input type="hidden" id="m-id">
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div>
+        <label class="label">Name *</label>
+        <input id="m-name" class="inp" placeholder="e.g. Dr. Adebayo" style="width:100%;">
+      </div>
+      <div>
+        <label class="label">Account Name</label>
+        <input id="m-account-name" class="inp" placeholder="Account holder name" style="width:100%;">
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="label">Account Number</label>
+          <input id="m-account-number" class="inp" placeholder="0123456789" style="width:100%;"
+                 maxlength="10" inputmode="numeric">
+        </div>
+        <div>
+          <label class="label">Bank Name</label>
+          <input id="m-bank" class="inp" placeholder="GTBank" style="width:100%;">
+        </div>
+      </div>
+      <div>
+        <label class="label">Description / Notes</label>
+        <input id="m-desc" class="inp" placeholder="Optional notes" style="width:100%;">
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="m-active" checked style="width:16px; height:16px; cursor:pointer;">
+        <label for="m-active" style="cursor:pointer; font-size:.875rem;">Active</label>
+      </div>
+    </div>
+
+    <div id="modal-err" style="margin-top:10px; color:var(--red); font-size:.85rem; min-height:18px;"></div>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveRec()">Save Recipient</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openModal(id, name, acctName, acctNum, bank, desc, active) {
+  document.getElementById('m-id').value           = id  || '';
+  document.getElementById('m-name').value         = name     || '';
+  document.getElementById('m-account-name').value = acctName || '';
+  document.getElementById('m-account-number').value = acctNum || '';
+  document.getElementById('m-bank').value         = bank || '';
+  document.getElementById('m-desc').value         = desc || '';
+  document.getElementById('m-active').checked     = (active === undefined || active === 1);
+  document.getElementById('modal-title').textContent = id ? 'Edit Recipient' : 'Add Recipient';
+  document.getElementById('modal-err').textContent = '';
+  document.getElementById('rec-modal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('rec-modal').style.display = 'none';
+}
+
+async function saveRec() {
+  const fd = new FormData();
+  const id = document.getElementById('m-id').value;
+  if (id) fd.append('id', id);
+  fd.append('name',           document.getElementById('m-name').value.trim());
+  fd.append('account_name',   document.getElementById('m-account-name').value.trim());
+  fd.append('account_number', document.getElementById('m-account-number').value.trim());
+  fd.append('bank_name',      document.getElementById('m-bank').value.trim());
+  fd.append('description',    document.getElementById('m-desc').value.trim());
+  fd.append('is_active',      document.getElementById('m-active').checked ? '1' : '0');
+
+  const errEl = document.getElementById('modal-err');
+  const r = await fetch('/revenue-share/recipients/save', { method:'POST', body:fd });
+  const d = await r.json();
+  if (!d.ok) { errEl.textContent = d.error; return; }
+
+  // Reload for simplicity (keeps server as source of truth)
+  window.location.reload();
+}
+
+async function deleteRec(id) {
+  if (!confirm('Delete this recipient? This cannot be undone if they have no allocations.')) return;
+  const fd = new FormData();
+  const r  = await fetch(`/revenue-share/recipients/${id}/delete`, { method:'POST', body:fd });
+  const d  = await r.json();
+  if (!d.ok) { alert(d.error); return; }
+  const row = document.getElementById(`rec-row-${id}`);
+  if (row) row.remove();
+}
+
+// Close on backdrop click
+document.getElementById('rec-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}
