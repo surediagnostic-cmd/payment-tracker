@@ -202,6 +202,10 @@
   </a>
   {% endif %}
   {% if current_user.is_mds %}
+  <a href="{{ url_for('revenue_share.index') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('revenue_share') %}active{% endif %}" onclick="closeSidebar()">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/><path d="M12 12 L12 3 A9 9 0 0 1 20.5 7.5 Z" fill="currentColor" opacity=".25"/></svg>
+    Revenue Share
+  </a>
   <a href="{{ url_for('admin.admin') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('admin') %}active{% endif %}" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
     Admin Settings
