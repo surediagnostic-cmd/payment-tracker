@@ -184,7 +184,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center;
                   padding:6px 0; border-bottom:1px solid var(--border); font-size:.85rem;">
         <span>{{ alloc.recipient.name }}</span>
-        <a href="{{ url_for('approvals.review', request_id=alloc.payment_request.id) }}"
+        <a href="{{ url_for('approvals.review', req_id=alloc.payment_request.id) }}"
            style="color:var(--orange); text-decoration:none;">
           {{ alloc.payment_request.reference }} →
         </a>
@@ -310,3 +310,4 @@ async function togglePaid(btn, periodId, allocId) {
 }
 </script>
 {% endblock %}
+
