@@ -23,7 +23,7 @@
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:13px;">
       <div><span style="color:var(--muted);">Unit:</span> <strong>{{ item.unit }}</strong></div>
-      <div><span style="color:var(--muted);">Pack Size:</span> <strong>{{ item.pack_size or '—' }}</strong></div>
+      <div><span style="color:var(--muted);">Pack Size:</span> <strong>{{ item.pack_size or '—' }}</strong>{% if item.purchase_unit %} <span style="color:var(--muted); font-size:.82rem;">(per {{ item.purchase_unit }})</span>{% endif %}</div>
       <div><span style="color:var(--muted);">Unit Price:</span> <strong>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}—{% endif %}</strong></div>
       <div><span style="color:var(--muted);">Reorder Level:</span> <strong>{{ item.reorder_level or '—' }} {{ item.unit if item.reorder_level else '' }}</strong></div>
       <div style="grid-column:1/-1;"><span style="color:var(--muted);">Total Stock:</span>
@@ -155,8 +155,13 @@
           <input name="unit" class="inp" value="{{ item.unit }}">
         </div>
         <div>
-          <label class="label">Pack Size</label>
+          <label class="label">Pack Size (units/pack)</label>
           <input name="pack_size" class="inp" type="number" min="1" value="{{ item.pack_size or '' }}">
+        </div>
+        <div>
+          <label class="label">Purchase Unit Label</label>
+          <input name="purchase_unit" class="inp" placeholder="Pack / Box / Kit / Bottle"
+                 value="{{ item.purchase_unit or '' }}">
         </div>
         <div>
           <label class="label">Unit Price (₦)</label>
@@ -179,3 +184,5 @@
   </div>
 </div>
 {% endblock %}
+
+
