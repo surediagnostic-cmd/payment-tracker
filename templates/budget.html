@@ -190,7 +190,29 @@
         {% for cat in categories %}
         {% set cell = grid[br.id][cat.id] %}
         <tr style="{% if cell.over %}background:rgba(248,113,113,.06);{% elif cell.warn %}background:rgba(245,130,31,.04);{% endif %}">
-          <td style="color:var(--white); font-weight:500;">{{ cat.name }}</td>
+          <td style="color:var(--white); font-weight:500;">
+            {% if period == 'monthly' %}
+            {% set li_list = line_items_map.get((br.id, cat.id), []) %}
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span>{{ cat.name }}</span>
+              <button type="button" onclick="toggleSubItems({{ br.id }}, {{ cat.id }})"
+                      style="background:none; border:1px solid var(--border); border-radius:5px;
+                             color:var(--dim); font-size:10px; cursor:pointer; padding:2px 7px;
+                             display:inline-flex; align-items:center; gap:3px; white-space:nowrap;
+                             transition:border-color .15s, color .15s; flex-shrink:0;"
+                      onmouseover="this.style.color='var(--orange2)'; this.style.borderColor='var(--orange-d)'"
+                      onmouseout="this.style.color='var(--dim)'; this.style.borderColor='var(--border)'">
+                <span id="li-chevron-{{ br.id }}-{{ cat.id }}">▸</span>
+                <span id="li-count-{{ br.id }}-{{ cat.id }}"
+                      style="font-weight:700; color:var(--orange2); min-width:8px;">
+                  {% if li_list %}{{ li_list|length }}{% endif %}
+                </span>
+              </button>
+            </div>
+            {% else %}
+            {{ cat.name }}
+            {% endif %}
+          </td>
           <td style="text-align:center;">
             {% if cat.cost_type == 'direct_cost' %}
             <span class="badge badge-orange" style="font-size:9px;">Direct</span>
@@ -254,7 +276,7 @@
         <!-- Yearly: show per-month breakdown as a small sub-row -->
         {% if period == 'yearly' and cell.months_data is defined %}
         <tr id="yr-detail-{{ br.id }}-{{ cat.id }}" style="display:none; background:var(--bg);">
-          <td colspan="{% if period=='monthly' %}7{% else %}6{% endif %}" style="padding:10px 16px;">
+          <td colspan="6" style="padding:10px 16px;">
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               {% for md in cell.months_data %}
               <div style="text-align:center; min-width:52px;">
@@ -267,6 +289,60 @@
                 {% endif %}
               </div>
               {% endfor %}
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+
+        <!-- Monthly: expandable sub-items (budget breakdown) -->
+        {% if period == 'monthly' %}
+        {% set li_list = line_items_map.get((br.id, cat.id), []) %}
+        <tr id="li-row-{{ br.id }}-{{ cat.id }}" style="display:none; background:var(--bg);">
+          <td colspan="7" style="padding:0 0 0 12px;">
+            <div style="padding:10px 16px 14px 28px; border-left:3px solid var(--orange-d);">
+              <div style="font-size:10px; font-weight:700; color:var(--orange); text-transform:uppercase;
+                          letter-spacing:.6px; margin-bottom:10px;">
+                Budget Breakdown — {{ cat.name }}
+              </div>
+              <!-- Existing sub-items -->
+              <div id="li-list-{{ br.id }}-{{ cat.id }}">
+                {% for li in li_list %}
+                <div class="li-item" id="li-item-{{ li.id }}"
+                     style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+                  <span style="color:var(--dim); font-size:11px; width:14px; flex-shrink:0;">↳</span>
+                  <input class="li-name inp" value="{{ li.name }}"
+                         data-id="{{ li.id }}" data-branch="{{ br.id }}" data-cat="{{ cat.id }}"
+                         data-year="{{ year }}" data-month="{{ month }}"
+                         style="flex:1; font-size:12px; padding:4px 8px;"/>
+                  <input class="li-amt inp" type="number" step="0.01" min="0" value="{{ li.amount|float }}"
+                         data-id="{{ li.id }}" data-branch="{{ br.id }}" data-cat="{{ cat.id }}"
+                         data-year="{{ year }}" data-month="{{ month }}"
+                         style="width:130px; text-align:right; font-size:12px; padding:4px 8px;"/>
+                  <span class="li-status" id="li-status-{{ li.id }}"
+                        style="font-size:11px; min-width:14px; text-align:center;"></span>
+                  <button type="button" onclick="deleteLiItem({{ br.id }}, {{ cat.id }}, {{ li.id }})"
+                          class="btn-danger" style="padding:3px 8px; font-size:11px;">✕</button>
+                </div>
+                {% endfor %}
+              </div>
+              <!-- Add new sub-item -->
+              <div style="display:flex; align-items:center; gap:6px; margin-top:8px;
+                          padding-top:8px; border-top:1px solid var(--border);">
+                <span style="color:var(--orange-d); font-size:13px; width:14px; flex-shrink:0;">+</span>
+                <input id="li-new-name-{{ br.id }}-{{ cat.id }}" class="inp"
+                       placeholder="Sub-item name (e.g. Troponin Kit, Driver salary…)"
+                       style="flex:1; font-size:12px; padding:4px 8px; border-color:rgba(245,130,31,.3);"/>
+                <input id="li-new-amt-{{ br.id }}-{{ cat.id }}" class="inp"
+                       type="number" step="0.01" min="0" placeholder="0.00"
+                       style="width:130px; text-align:right; font-size:12px; padding:4px 8px;
+                              border-color:rgba(245,130,31,.3);"/>
+                <button type="button"
+                        onclick="addLiItem({{ br.id }}, {{ cat.id }}, {{ year }}, {{ month }})"
+                        class="btn-outline"
+                        style="padding:3px 14px; font-size:11px; white-space:nowrap;">+ Add</button>
+                <span id="li-add-status-{{ br.id }}-{{ cat.id }}"
+                      style="font-size:11px; min-width:14px; text-align:center;"></span>
+              </div>
             </div>
           </td>
         </tr>
@@ -445,6 +521,124 @@ document.querySelectorAll('.income-input').forEach(function(inp) {
       .catch(() => { if (statusEl) statusEl.textContent = '❌'; });
   }
   inp.addEventListener('blur', saveIncome);
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+  });
+});
+{% endif %}
+
+// ── Budget line items (sub-items) ─────────────────────────────────────────────
+{% if period == 'monthly' %}
+function toggleSubItems(brId, catId) {
+  const row     = document.getElementById('li-row-'     + brId + '-' + catId);
+  const chevron = document.getElementById('li-chevron-' + brId + '-' + catId);
+  if (!row) return;
+  const open = row.style.display !== 'none';
+  row.style.display   = open ? 'none' : '';
+  if (chevron) chevron.textContent = open ? '▸' : '▾';
+}
+
+function saveLiItem(brId, catId, year, month, id, nameEl, amtEl, statusEl) {
+  const name = (nameEl.value || '').trim();
+  if (!name) return;
+  if (statusEl) statusEl.textContent = '⏳';
+  const fd = new FormData();
+  fd.append('id', id); fd.append('branch_id', brId); fd.append('category_id', catId);
+  fd.append('year', year); fd.append('month', month);
+  fd.append('name', name); fd.append('amount', amtEl.value || '0');
+  fetch('{{ url_for("budget.save_line_item") }}', {method:'POST', body:fd})
+    .then(r => r.json())
+    .then(d => {
+      if (statusEl) {
+        statusEl.textContent = d.ok ? '✓' : '❌';
+        if (d.ok) setTimeout(() => { statusEl.textContent = ''; }, 2000);
+      }
+    })
+    .catch(() => { if (statusEl) statusEl.textContent = '❌'; });
+}
+
+function attachLiHandlers(itemEl, brId, catId, year, month, id) {
+  const nameEl   = itemEl.querySelector('.li-name');
+  const amtEl    = itemEl.querySelector('.li-amt');
+  const statusEl = document.getElementById('li-status-' + id);
+  [nameEl, amtEl].forEach(el => {
+    el.addEventListener('blur',    () => saveLiItem(brId, catId, year, month, id, nameEl, amtEl, statusEl));
+    el.addEventListener('keydown', e  => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+  });
+}
+
+function addLiItem(brId, catId, year, month) {
+  const nameEl   = document.getElementById('li-new-name-' + brId + '-' + catId);
+  const amtEl    = document.getElementById('li-new-amt-'  + brId + '-' + catId);
+  const statusEl = document.getElementById('li-add-status-' + brId + '-' + catId);
+  const name     = (nameEl.value || '').trim();
+  if (!name) { nameEl.style.borderColor = '#f87171'; nameEl.focus(); return; }
+  nameEl.style.borderColor = '';
+  if (statusEl) statusEl.textContent = '⏳';
+  const fd = new FormData();
+  fd.append('branch_id', brId); fd.append('category_id', catId);
+  fd.append('year', year); fd.append('month', month);
+  fd.append('name', name); fd.append('amount', amtEl.value || '0');
+  fetch('{{ url_for("budget.save_line_item") }}', {method:'POST', body:fd})
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) { if (statusEl) statusEl.textContent = '❌'; return; }
+      if (statusEl) { statusEl.textContent = '✓'; setTimeout(() => { statusEl.textContent = ''; }, 2000); }
+      const list = document.getElementById('li-list-' + brId + '-' + catId);
+      const div  = document.createElement('div');
+      div.className  = 'li-item';
+      div.id         = 'li-item-' + data.id;
+      div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:5px;';
+      const safeName = data.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+      div.innerHTML = `
+        <span style="color:var(--dim);font-size:11px;width:14px;flex-shrink:0;">↳</span>
+        <input class="li-name inp" value="${safeName}"
+               style="flex:1;font-size:12px;padding:4px 8px;"/>
+        <input class="li-amt inp" type="number" step="0.01" min="0" value="${data.amount}"
+               style="width:130px;text-align:right;font-size:12px;padding:4px 8px;"/>
+        <span class="li-status" id="li-status-${data.id}"
+              style="font-size:11px;min-width:14px;text-align:center;"></span>
+        <button type="button" onclick="deleteLiItem(${brId},${catId},${data.id})"
+                class="btn-danger" style="padding:3px 8px;font-size:11px;">✕</button>`;
+      list.appendChild(div);
+      attachLiHandlers(div, brId, catId, year, month, data.id);
+      nameEl.value = ''; amtEl.value = '';
+      updateLiCount(brId, catId);
+    })
+    .catch(() => { if (statusEl) statusEl.textContent = '❌'; });
+}
+
+function deleteLiItem(brId, catId, id) {
+  if (!confirm('Delete this sub-item?')) return;
+  fetch('/budget/line-item/' + id + '/delete', {method:'POST'})
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) { alert('Delete failed: ' + (data.error || '')); return; }
+      const el = document.getElementById('li-item-' + id);
+      if (el) el.remove();
+      updateLiCount(brId, catId);
+    })
+    .catch(() => alert('Delete request failed.'));
+}
+
+function updateLiCount(brId, catId) {
+  const countEl = document.getElementById('li-count-'   + brId + '-' + catId);
+  const list    = document.getElementById('li-list-'    + brId + '-' + catId);
+  const count   = list ? list.querySelectorAll('.li-item').length : 0;
+  if (countEl) countEl.textContent = count > 0 ? count : '';
+}
+
+// Attach blur/Enter handlers to server-rendered existing sub-items
+document.querySelectorAll('.li-name, .li-amt').forEach(function(inp) {
+  const id = inp.dataset.id;
+  if (!id) return;
+  inp.addEventListener('blur', function() {
+    const item = document.getElementById('li-item-' + id);
+    if (!item) return;
+    saveLiItem(inp.dataset.branch, inp.dataset.cat, inp.dataset.year, inp.dataset.month,
+               id, item.querySelector('.li-name'), item.querySelector('.li-amt'),
+               document.getElementById('li-status-' + id));
+  });
   inp.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
   });
