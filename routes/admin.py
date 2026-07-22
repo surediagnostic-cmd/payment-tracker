@@ -179,3 +179,68 @@ def reset_password(user_id):
     db.session.commit()
     flash(f"Password reset for '{user.name}'.", "success")
     return redirect(url_for("admin.admin"))
+
+
+# ── Accountant: request new user (pending MDS activation) ────────────────────
+
+@admin_bp.route("/admin/users/new", methods=["GET"])
+@login_required
+def new_user_form():
+    if current_user.is_lab_staff:
+        return redirect(url_for("requests.dashboard"))
+    branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    # MDS pending count shown in sidebar badge
+    pending_count = User.query.filter_by(is_active=False).count() if current_user.is_mds else 0
+    return render_template("add_user.html", branches=branches, pending_count=pending_count)
+
+
+@admin_bp.route("/admin/users/submit", methods=["POST"])
+@login_required
+def submit_user():
+    if current_user.is_lab_staff:
+        return redirect(url_for("requests.dashboard"))
+
+    name       = request.form.get("name",     "").strip()
+    email      = request.form.get("email",    "").strip().lower()
+    password   = request.form.get("password", "").strip()
+    role       = request.form.get("role",     "accountant")
+    branch_ids = request.form.getlist("branch_ids[]", type=int)
+
+    if not all([name, email, password]):
+        flash("Name, email, and password are required.", "error")
+        return redirect(url_for("admin.new_user_form"))
+    if len(password) < 6:
+        flash("Password must be at least 6 characters.", "error")
+        return redirect(url_for("admin.new_user_form"))
+    if User.query.filter_by(email=email).first():
+        flash(f"Email '{email}' is already in use.", "error")
+        return redirect(url_for("admin.new_user_form"))
+
+    # Accountants can only create accountant/lab_staff roles
+    if not current_user.is_mds and role not in ("accountant", "lab_staff"):
+        role = "accountant"
+
+    # Users submitted by accountants start inactive — MDS must activate them
+    starts_active = current_user.is_mds
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    user = User(name=name, email=email, password_hash=pw_hash, role=role,
+                is_active=starts_active)
+    if role in ("accountant", "lab_staff") and branch_ids:
+        user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all()
+    db.session.add(user)
+    db.session.commit()
+
+    if starts_active:
+        flash(f"User '{name}' created and activated.", "success")
+        return redirect(url_for("admin.admin"))
+    else:
+        flash(f"User '{name}' submitted — awaiting MDS activation.", "info")
+        return redirect(url_for("requests.dashboard"))
+
+
+@admin_bp.route("/admin/users/pending")
+@login_required
+@_mds_required
+def pending_users():
+    users = User.query.filter_by(is_active=False).order_by(User.created_at.desc()).all()
+    return render_template("pending_users.html", users=users)
