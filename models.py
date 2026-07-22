@@ -210,7 +210,8 @@ class InventoryItem(db.Model):
     item_code   = db.Column(db.String(50),  nullable=True)
     category    = db.Column(db.String(50),  nullable=False, default='lab_reagent')
     unit        = db.Column(db.String(50),  nullable=False, default='unit')
-    pack_size   = db.Column(db.Integer,     nullable=True)
+    pack_size      = db.Column(db.Integer,     nullable=True)
+    purchase_unit  = db.Column(db.String(40),  nullable=True)
     unit_price  = db.Column(db.Numeric(14, 2), nullable=True)
     reorder_level = db.Column(db.Numeric(14, 4), nullable=True)
     is_active   = db.Column(db.Boolean, default=True)
@@ -502,3 +503,5 @@ class BranchAllocationTemplate(db.Model):
     branch       = db.relationship('Branch')
     recipient    = db.relationship('RevenueShareRecipient')
     __table_args__ = (db.UniqueConstraint('branch_id', 'recipient_id', name='uq_bat_branch_recipient'),)
+
+
