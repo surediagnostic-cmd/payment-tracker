@@ -486,3 +486,19 @@ class RevenueShareAllocation(db.Model):
     period             = db.relationship('RevenueSharePeriod', back_populates='allocations')
     recipient          = db.relationship('RevenueShareRecipient')
     payment_request    = db.relationship('PaymentRequest')
+
+
+
+
+class BranchAllocationTemplate(db.Model):
+    """Management-approved default % split per branch, used to pre-populate weekly runs."""
+    __tablename__ = "branch_allocation_templates"
+    id           = db.Column(db.Integer, primary_key=True)
+    branch_id    = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='CASCADE'), nullable=False)
+    recipient_id = db.Column(db.Integer, db.ForeignKey('revenue_share_recipients.id', ondelete='CASCADE'), nullable=False)
+    percentage   = db.Column(db.Numeric(6, 3), nullable=False, default=0)
+    updated_at   = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_by   = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    branch       = db.relationship('Branch')
+    recipient    = db.relationship('RevenueShareRecipient')
+    __table_args__ = (db.UniqueConstraint('branch_id', 'recipient_id', name='uq_bat_branch_recipient'),)
