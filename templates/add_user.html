@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Add User{% endblock %}
+
+{% block content %}
+<div style="max-width:520px; margin:0 auto;">
+
+  <div style="margin-bottom:24px;">
+    <h1 style="margin:0 0 4px; font-size:1.35rem; font-weight:700;">Add User</h1>
+    {% if current_user.is_mds %}
+    <p style="margin:0; color:var(--muted); font-size:.875rem;">
+      Users created here are immediately active.
+      {% if pending_count > 0 %}
+      · <a href="{{ url_for('admin.pending_users') }}" style="color:var(--orange);">
+          {{ pending_count }} pending activation →
+        </a>
+      {% endif %}
+    </p>
+    {% else %}
+    <p style="margin:0; color:var(--muted); font-size:.875rem;">
+      New accounts are inactive until the MDS approves them.
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="kpi-card" style="padding:28px;">
+    <form method="POST" action="{{ url_for('admin.submit_user') }}"
+          style="display:flex; flex-direction:column; gap:16px;">
+
+      <div>
+        <label class="label">Full Name *</label>
+        <input name="name" class="inp" placeholder="e.g. Amina Okafor" required>
+      </div>
+
+      <div>
+        <label class="label">Email Address *</label>
+        <input name="email" type="email" class="inp" placeholder="user@example.com" required>
+      </div>
+
+      <div>
+        <label class="label">Temporary Password *</label>
+        <input name="password" type="password" class="inp" placeholder="Min. 6 characters" required minlength="6">
+      </div>
+
+      <div>
+        <label class="label">Role</label>
+        <select name="role" class="inp" id="role-select" onchange="toggleBranchSection()">
+          <option value="accountant">Accountant</option>
+          <option value="lab_staff">Lab Staff</option>
+          {% if current_user.is_mds %}
+          <option value="mds">MDS</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div id="branch-section">
+        <label class="label">Assign Branches</label>
+        <div style="display:flex; flex-direction:column; gap:7px; margin-top:4px;">
+          {% for br in branches %}
+          <label style="display:flex; align-items:center; gap:9px; cursor:pointer;
+                        padding:8px 12px; border:1px solid var(--border); border-radius:8px;
+                        transition:border-color .15s;"
+                 onmouseover="this.style.borderColor='var(--orange-d)'"
+                 onmouseout="this.style.borderColor='var(--border)'">
+            <input type="checkbox" name="branch_ids[]" value="{{ br.id }}"
+                   style="width:15px; height:15px; accent-color:var(--orange); cursor:pointer;">
+            <span style="font-size:.875rem; color:var(--text);">{{ br.name }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div style="padding-top:8px; border-top:1px solid var(--border);
+                  display:flex; gap:10px; justify-content:flex-end;">
+        <a href="{{ url_for('requests.dashboard') }}" class="btn-outline"
+           style="text-decoration:none;">Cancel</a>
+        <button type="submit" class="btn-primary">
+          {% if current_user.is_mds %}Create User{% else %}Submit for Approval{% endif %}
+        </button>
+      </div>
+
+    </form>
+  </div>
+
+  {% if not current_user.is_mds %}
+  <div style="margin-top:14px; padding:12px 16px; border-radius:10px;
+              background:var(--orange-d); border:1px solid rgba(245,130,31,.25);
+              font-size:.8rem; color:var(--orange2);">
+    The MDS will receive this request and activate the account before the user can log in.
+  </div>
+  {% endif %}
+
+</div>
+
+<script>
+function toggleBranchSection() {
+  const role = document.getElementById('role-select').value;
+  const sec  = document.getElementById('branch-section');
+  sec.style.display = (role === 'mds') ? 'none' : '';
+}
+</script>
+{% endblock %}
