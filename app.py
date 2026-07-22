@@ -342,6 +342,21 @@ def _run_migrations():
             print(f"[migration] branch_allocation_templates: {e}")
 
 
+    # 8. purchase_unit column on inventory_items
+    if 'inventory_items' in tables:
+        inv_cols = {col['name'] for col in insp.get_columns('inventory_items')}
+        if 'purchase_unit' not in inv_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE inventory_items ADD COLUMN purchase_unit VARCHAR(40)"
+                ))
+                db.session.commit()
+                print("[migration] added purchase_unit to inventory_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] purchase_unit: {e}")
+
+
 def _seed_defaults():
     from models import Branch, Category, User
     import bcrypt
