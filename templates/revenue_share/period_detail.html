@@ -28,11 +28,18 @@
     </p>
     {% endif %}
   </div>
-  {% if is_draft %}
-  <button id="finalise-btn" class="btn-primary" onclick="finalisePeriod()">
-    Finalise &amp; Create Payment Requests
-  </button>
-  {% endif %}
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    {% if is_draft %}
+    <button id="finalise-btn" class="btn-primary" onclick="finalisePeriod()">
+      Finalise &amp; Create Payment Requests
+    </button>
+    {% else %}
+    <button class="btn-outline" onclick="revertToDraft()"
+            style="font-size:.85rem; padding:7px 16px; color:var(--muted); border-color:var(--border);">
+      ← Revert to Draft
+    </button>
+    {% endif %}
+  </div>
 </div>
 
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start;">
@@ -287,6 +294,17 @@ async function finalisePeriod() {
   window.location.href = `/revenue-share/periods/${PERIOD_ID}`;
 }
 
+async function revertToDraft() {
+  if (!confirm('Revert to Draft?\n\nThe auto-created payment requests for this period will be deleted — as long as none have been approved by MDS yet.\n\nYou can re-finalise after making corrections.')) return;
+  const r = await fetch(`/revenue-share/periods/${PERIOD_ID}/revert`, { method: 'POST', body: new FormData() });
+  const d = await r.json();
+  if (d.ok) {
+    window.location.reload();
+  } else {
+    alert('Cannot revert:\n\n' + d.error);
+  }
+}
+
 async function togglePaid(btn, periodId, allocId) {
   btn.disabled = true;
   const fd = new FormData();
@@ -310,4 +328,5 @@ async function togglePaid(btn, periodId, allocId) {
 }
 </script>
 {% endblock %}
+
 
