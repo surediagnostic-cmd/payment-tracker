@@ -268,6 +268,31 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] parent_id: {e}")
 
+    # 6c. Add inventory_item_id and qty_ordered to payment_request_items (Feature #2)
+    if 'payment_request_items' in tables:
+        item_cols = {c['name'] for c in insp.get_columns('payment_request_items')}
+        if 'inventory_item_id' not in item_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_request_items "
+                    "ADD COLUMN inventory_item_id INTEGER REFERENCES inventory_items(id) ON DELETE SET NULL"
+                ))
+                db.session.commit()
+                print("[migration] added inventory_item_id to payment_request_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] inventory_item_id: {e}")
+        if 'qty_ordered' not in item_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_request_items ADD COLUMN qty_ordered NUMERIC(14,4)"
+                ))
+                db.session.commit()
+                print("[migration] added qty_ordered to payment_request_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] qty_ordered: {e}")
+
     # 7. Create budgets table if missing (db.create_all handles new deployments;
     #    this covers existing deployments that already have the other tables)
     if 'budgets' not in tables:
