@@ -580,6 +580,32 @@ def save_income():
 
 # ── budget line items (sub-items) ─────────────────────────────────────────────
 
+def _sync_budget_from_items(branch_id, category_id, year, month):
+    """Sum all sub-items and write that total into the Budget record.
+    Returns the new total as a Decimal."""
+    total = db.session.query(
+        func.coalesce(func.sum(BudgetLineItem.amount), 0)
+    ).filter_by(
+        branch_id=branch_id, category_id=category_id, year=year, month=month
+    ).scalar()
+    total = Decimal(str(total or 0))
+
+    existing = Budget.query.filter_by(
+        branch_id=branch_id, category_id=category_id,
+        period_type="monthly", year=year, month=month, week=None
+    ).first()
+    if existing:
+        existing.amount     = total
+        existing.updated_at = datetime.now(timezone.utc)
+    else:
+        db.session.add(Budget(
+            branch_id=branch_id, category_id=category_id,
+            period_type="monthly", year=year, month=month, week=None,
+            amount=total, created_by=current_user.id,
+        ))
+    return total
+
+
 @budget_bp.route("/budget/line-item/save", methods=["POST"])
 @login_required
 def save_line_item():
@@ -618,8 +644,11 @@ def save_line_item():
             )
             db.session.add(li)
 
+        db.session.flush()
+        new_total = _sync_budget_from_items(branch_id, category_id, year, month)
         db.session.commit()
-        return jsonify(ok=True, id=li.id, name=li.name, amount=float(li.amount))
+        return jsonify(ok=True, id=li.id, name=li.name, amount=float(li.amount),
+                       category_sum=float(new_total))
 
     except Exception as e:
         try: db.session.rollback()
@@ -634,9 +663,12 @@ def delete_line_item(item_id):
         li = BudgetLineItem.query.get_or_404(item_id)
         if li.branch_id not in _allowed_branch_ids():
             return jsonify(ok=False, error="Access denied"), 403
+        branch_id, category_id, year, month = li.branch_id, li.category_id, li.year, li.month
         db.session.delete(li)
+        db.session.flush()
+        new_total = _sync_budget_from_items(branch_id, category_id, year, month)
         db.session.commit()
-        return jsonify(ok=True)
+        return jsonify(ok=True, category_sum=float(new_total))
     except Exception as e:
         try: db.session.rollback()
         except Exception: pass
