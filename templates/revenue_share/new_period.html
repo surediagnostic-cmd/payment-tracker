@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}New Revenue Share Period{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:8px;">
+  <a href="{{ url_for('revenue_share.index') }}" style="color:var(--muted); text-decoration:none; font-size:.875rem;">
+    ← Revenue Share
+  </a>
+</div>
+
+<h1 style="margin:0 0 24px; font-size:1.35rem; font-weight:700;">New Revenue Share Period</h1>
+
+<form method="POST" style="max-width:700px;">
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+
+    <div class="kpi-card" style="padding:20px; grid-column:1/-1;">
+      <h3 style="margin:0 0 16px; font-size:.95rem; font-weight:600;">Period Details</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+
+        <div>
+          <label class="label">Period Label *</label>
+          <input name="label" class="inp" required placeholder="e.g. June 2025 Revenue Share"
+                 style="width:100%;" value="{{ request.form.get('label', '') }}">
+        </div>
+
+        <div>
+          <label class="label">Branch</label>
+          <select name="branch_id" class="inp" style="width:100%;">
+            <option value="">— All / General —</option>
+            {% for br in branches %}
+            <option value="{{ br.id }}"
+              {{ 'selected' if request.form.get('branch_id') == br.id|string }}>
+              {{ br.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="label">Gross Revenue (₦) *</label>
+          <input name="gross_revenue" class="inp" type="number" step="0.01" min="0"
+                 required placeholder="0.00" style="width:100%;"
+                 value="{{ request.form.get('gross_revenue', '') }}"
+                 id="gross-input" oninput="recalcAmounts()">
+        </div>
+
+        <div></div>
+
+        <div>
+          <label class="label">Period Start</label>
+          <input name="period_start" class="inp" type="date" style="width:100%;"
+                 value="{{ request.form.get('period_start', '') }}">
+        </div>
+
+        <div>
+          <label class="label">Period End</label>
+          <input name="period_end" class="inp" type="date" style="width:100%;"
+                 value="{{ request.form.get('period_end', '') }}">
+        </div>
+
+        <div style="grid-column:1/-1;">
+          <label class="label">Notes</label>
+          <textarea name="notes" class="inp" rows="2" style="width:100%; resize:vertical;"
+                    placeholder="Optional notes">{{ request.form.get('notes', '') }}</textarea>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  {# ── Recipient allocations ─────────────────────────────────────────────── #}
+  <div class="kpi-card" style="padding:20px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <h3 style="margin:0; font-size:.95rem; font-weight:600;">Recipient Allocations</h3>
+      <div style="font-size:.875rem; color:var(--muted);">
+        Total: <span id="total-pct-display"
+          style="font-weight:700; color:var(--orange);">0.0%</span>
+        &nbsp;|&nbsp;
+        ₦<span id="total-amt-display">0</span>
+      </div>
+    </div>
+
+    {% if not recipients %}
+    <p style="color:var(--muted); font-size:.875rem;">
+      No active recipients.
+      <a href="{{ url_for('revenue_share.recipients') }}" style="color:var(--orange);">Add recipients first →</a>
+    </p>
+    {% else %}
+    <table style="width:100%; border-collapse:collapse; font-size:.875rem; margin-bottom:12px;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">Recipient</th>
+          <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">Bank</th>
+          <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">% Allocation</th>
+          <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border);
+                     color:var(--muted); font-weight:500;">Amount (₦)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rec in recipients %}
+        <tr style="border-top:1px solid var(--border);">
+          <td style="padding:8px 8px; font-weight:500;">{{ rec.name }}</td>
+          <td style="padding:8px 8px; color:var(--muted); font-size:.82rem;">
+            {{ rec.bank_name or '—' }}
+            {% if rec.account_number %} · {{ rec.account_number }}{% endif %}
+          </td>
+          <td style="padding:8px 8px; text-align:right; width:110px;">
+            <input type="number" name="pct_{{ rec.id }}" class="inp pct-field"
+                   step="0.01" min="0" max="100" placeholder="0"
+                   value="{{ request.form.get('pct_' ~ rec.id, '') }}"
+                   style="width:80px; text-align:right; padding:4px 6px;"
+                   oninput="recalcAmounts()">
+          </td>
+          <td id="amt-{{ rec.id }}" style="padding:8px 8px; text-align:right; color:var(--muted);">—</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="font-size:.8rem; color:var(--muted); margin:0;">
+      Leave a field blank or at 0 to exclude that recipient from this period.
+    </p>
+    {% endif %}
+  </div>
+
+  <div style="display:flex; gap:12px; justify-content:flex-end;">
+    <a href="{{ url_for('revenue_share.index') }}" class="btn-outline" style="text-decoration:none;">
+      Cancel
+    </a>
+    <button type="submit" class="btn-primary">Create Period (Draft)</button>
+  </div>
+
+</form>
+
+<script>
+const recIds = {{ recipients|map(attribute='id')|list|tojson }};
+
+function fmt(n) {
+  return parseFloat(n || 0).toLocaleString('en-NG', {maximumFractionDigits: 0});
+}
+
+function recalcAmounts() {
+  const gross = parseFloat(document.getElementById('gross-input').value || 0);
+  let totalPct = 0;
+  let totalAmt = 0;
+  recIds.forEach(rid => {
+    const inp = document.querySelector(`input[name="pct_${rid}"]`);
+    const pct = parseFloat(inp ? inp.value || 0 : 0);
+    totalPct += pct;
+    const amt = gross * pct / 100;
+    totalAmt += amt;
+    const amtEl = document.getElementById(`amt-${rid}`);
+    if (amtEl) amtEl.textContent = pct > 0 ? fmt(amt) : '—';
+  });
+  const pctEl = document.getElementById('total-pct-display');
+  const amtEl = document.getElementById('total-amt-display');
+  if (pctEl) {
+    pctEl.textContent = totalPct.toFixed(1) + '%';
+    pctEl.style.color = Math.abs(totalPct - 100) < 0.01
+      ? 'var(--green)' : totalPct > 100 ? 'var(--red)' : 'var(--orange)';
+  }
+  if (amtEl) amtEl.textContent = fmt(totalAmt);
+}
+
+// Run on load to handle form re-submit repopulation
+recalcAmounts();
+</script>
+{% endblock %}
