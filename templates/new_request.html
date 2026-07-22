@@ -90,20 +90,21 @@
               Tag inventory item (optional)
             </button>
             <div data-inv-panel="0" style="display:none; margin-top:6px; padding:8px 12px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
-              <div style="display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;">
+              <div style="display:grid; grid-template-columns:1fr 140px; gap:8px; align-items:start;">
                 <div>
                   <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Inventory Item</div>
-                  <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;">
+                  <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;" onchange="onInvChange(0)">
                     <option value="">— none —</option>
-                    {% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}</option>{% endfor %}
+                    {% for item in inventory_items %}<option value="{{ item.id }}" data-pack-size="{{ item.pack_size or '' }}" data-purchase-unit="{{ item.purchase_unit or '' }}" data-unit="{{ item.unit or '' }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}{% if item.pack_size %} · {{ item.purchase_unit or 'Pack' }}/{{ item.pack_size }}{% endif %}</option>{% endfor %}
                   </select>
                 </div>
                 <div>
-                  <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
+                  <div data-inv-qty-label style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
                   <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
-                         style="font-size:12px; padding:5px 8px;"/>
+                         style="font-size:12px; padding:5px 8px;" oninput="onInvQtyInput(0)"/>
                 </div>
               </div>
+              <div data-inv-calc style="display:none; font-size:10px; color:var(--orange); margin-top:6px; padding:4px 8px; background:rgba(245,130,31,0.1); border-radius:5px; border:1px solid rgba(245,130,31,0.2);"></div>
               <div style="font-size:10px; color:var(--dim); margin-top:5px;">On approval, this creates an In-Transit entry for Lab Staff to confirm.</div>
             </div>
           </div>
@@ -173,7 +174,7 @@
 const categoryOptions = `{% for cat in categories %}<option value="{{ cat.id }}">{{ cat.name }}</option>{% endfor %}`;
 
 // Inventory items for optional linking
-const inventoryOptions = `<option value="">— none —</option>{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}</option>{% endfor %}`;
+const inventoryOptions = `<option value="">— none —</option>{% for item in inventory_items %}<option value="{{ item.id }}" data-pack-size="{{ item.pack_size or '' }}" data-purchase-unit="{{ item.purchase_unit or '' }}" data-unit="{{ item.unit or '' }}">{{ item.name }}{% if item.unit %} ({{ item.unit }}){% endif %}{% if item.pack_size %} · {{ item.purchase_unit or 'Pack' }}/{{ item.pack_size }}{% endif %}</option>{% endfor %}`;
 
 let uidSeq = 1; // 0 is used by the static first row
 {% if not edit_mode %}document.getElementById('dateField').value = new Date().toISOString().split('T')[0];{% endif %}
@@ -215,17 +216,18 @@ function subItemHtml(parentUid, uid) {
       Tag inventory item (optional)
     </button>
     <div data-inv-panel="${uid}" style="display:none; margin-top:5px; padding:7px 10px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
-      <div style="display:grid; grid-template-columns:1fr 110px; gap:7px; align-items:center;">
+      <div style="display:grid; grid-template-columns:1fr 130px; gap:7px; align-items:start;">
         <div>
           <div style="font-size:10px; color:var(--muted); margin-bottom:2px; font-weight:600;">Inventory Item</div>
-          <select data-field="inventory_item_id" class="inp" style="font-size:11px; padding:4px 7px;">${inventoryOptions}</select>
+          <select data-field="inventory_item_id" class="inp" style="font-size:11px; padding:4px 7px;" onchange="onInvChange(${uid})">${inventoryOptions}</select>
         </div>
         <div>
-          <div style="font-size:10px; color:var(--muted); margin-bottom:2px; font-weight:600;">Qty</div>
+          <div data-inv-qty-label style="font-size:10px; color:var(--muted); margin-bottom:2px; font-weight:600;">Qty to Receive</div>
           <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
-                 style="font-size:11px; padding:4px 7px;"/>
+                 style="font-size:11px; padding:4px 7px;" oninput="onInvQtyInput(${uid})"/>
         </div>
       </div>
+      <div data-inv-calc style="display:none; font-size:10px; color:var(--orange); margin-top:6px; padding:4px 8px; background:rgba(245,130,31,0.1); border-radius:5px; border:1px solid rgba(245,130,31,0.2);"></div>
     </div>
   </div>
 </div>`;
@@ -262,17 +264,18 @@ function parentRowHtml(uid) {
       Tag inventory item (optional)
     </button>
     <div data-inv-panel="${uid}" style="display:none; margin-top:6px; padding:8px 12px; background:rgba(245,130,31,0.06); border:1px solid rgba(245,130,31,0.2); border-radius:6px;">
-      <div style="display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;">
+      <div style="display:grid; grid-template-columns:1fr 140px; gap:8px; align-items:start;">
         <div>
           <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Inventory Item</div>
-          <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;">${inventoryOptions}</select>
+          <select data-field="inventory_item_id" class="inp" style="font-size:12px; padding:5px 8px;" onchange="onInvChange(${uid})">${inventoryOptions}</select>
         </div>
         <div>
-          <div style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
+          <div data-inv-qty-label style="font-size:10px; color:var(--muted); margin-bottom:3px; font-weight:600;">Qty to Receive</div>
           <input data-field="qty_ordered" class="inp" type="number" min="0.001" step="any" placeholder="auto"
-                 style="font-size:12px; padding:5px 8px;"/>
+                 style="font-size:12px; padding:5px 8px;" oninput="onInvQtyInput(${uid})"/>
         </div>
       </div>
+      <div data-inv-calc style="display:none; font-size:10px; color:var(--orange); margin-top:6px; padding:4px 8px; background:rgba(245,130,31,0.1); border-radius:5px; border:1px solid rgba(245,130,31,0.2);"></div>
       <div style="font-size:10px; color:var(--dim); margin-top:5px;">On approval, creates an In-Transit entry for Lab Staff to confirm.</div>
     </div>
   </div>
@@ -296,6 +299,63 @@ function toggleInvPanel(uid) {
   const panel = document.querySelector(`[data-inv-panel="${uid}"]`);
   if (!panel) return;
   panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+function refreshInvCalcDisplay(uid) {
+  const panel = document.querySelector(`[data-inv-panel="${uid}"]`);
+  if (!panel || panel.style.display === 'none') return;
+  const sel  = panel.querySelector('[data-field="inventory_item_id"]');
+  const opt  = sel && sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) return;
+  const ps   = parseInt(opt.dataset.packSize || '0');
+  if (!ps) return;
+  const pu   = opt.dataset.purchaseUnit || 'Pack';
+  const unit = opt.dataset.unit || '';
+  const qOrd = panel.querySelector('[data-field="qty_ordered"]');
+  const row  = panel.closest('.item-row');
+  const qty  = parseFloat(qOrd && qOrd.value) || parseFloat(row && row.querySelector('.qty-input') && row.querySelector('.qty-input').value) || 1;
+  const calcEl = panel.querySelector('[data-inv-calc]');
+  if (calcEl) {
+    if (qty > 0) {
+      calcEl.style.display = '';
+      calcEl.textContent = qty + ' ' + pu + '(s) × ' + ps + ' = ' + (qty * ps).toLocaleString() + ' ' + (unit || 'units') + ' added to stock on confirmation';
+    } else {
+      calcEl.style.display = 'none';
+    }
+  }
+}
+
+function onInvChange(uid) {
+  const panel = document.querySelector(`[data-inv-panel="${uid}"]`);
+  if (!panel) return;
+  const sel    = panel.querySelector('[data-field="inventory_item_id"]');
+  const opt    = sel && sel.options[sel.selectedIndex];
+  const qOrd   = panel.querySelector('[data-field="qty_ordered"]');
+  const labelEl = panel.querySelector('[data-inv-qty-label]');
+  const calcEl  = panel.querySelector('[data-inv-calc]');
+
+  if (!opt || !opt.value) {
+    if (labelEl) labelEl.textContent = 'Qty to Receive';
+    if (calcEl)  { calcEl.style.display = 'none'; calcEl.textContent = ''; }
+    if (qOrd)    qOrd.value = '';
+    return;
+  }
+
+  const ps = parseInt(opt.dataset.packSize || '0');
+  const pu = opt.dataset.purchaseUnit || '';
+
+  // Auto-populate qty_ordered from row qty only if currently blank
+  if (qOrd && !qOrd.value) {
+    const row = panel.closest('.item-row');
+    qOrd.value = parseFloat(row && row.querySelector('.qty-input') && row.querySelector('.qty-input').value) || 1;
+  }
+
+  if (labelEl) labelEl.textContent = ps > 0 ? (pu || 'Pack') + 's to Receive' : 'Qty to Receive';
+  refreshInvCalcDisplay(uid);
+}
+
+function onInvQtyInput(uid) {
+  refreshInvCalcDisplay(uid);
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -407,6 +467,7 @@ function onRowInput(row) {
     }
   }
   calcGrandTotal();
+  refreshInvCalcDisplay(row.dataset.uid);
 }
 
 function calcGrandTotal() {
@@ -551,6 +612,7 @@ function loadExistingItems(items) {
       if (invSel) invSel.value = item.inventory_item_id;
       const qOrd = row.querySelector('[data-field="qty_ordered"]');
       if (qOrd && item.qty_ordered) qOrd.value = item.qty_ordered;
+      onInvChange(uid);
     }
     (item.children || []).forEach(ch => {
       const cuid = genUid();
@@ -573,6 +635,7 @@ function loadExistingItems(items) {
         if (cs) cs.value = ch.inventory_item_id;
         const cq = crow.querySelector('[data-field="qty_ordered"]');
         if (cq && ch.qty_ordered) cq.value = ch.qty_ordered;
+        onInvChange(cuid);
       }
       onRowInput(crow);
     });
@@ -590,5 +653,6 @@ loadExistingItems({{ existing_items_json | safe }});
 updateRemoveButtons();
 </script>
 {% endblock %}
+
 
 
