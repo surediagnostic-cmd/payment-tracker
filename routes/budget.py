@@ -17,7 +17,7 @@ from flask_login import login_required, current_user
 from sqlalchemy import func, extract
 
 from app import db
-from models import Branch, Category, Budget, PaymentRequest, PaymentRequestItem, ProjectedIncome
+from models import Branch, Category, Budget, PaymentRequest, PaymentRequestItem, ProjectedIncome, BudgetLineItem
 
 budget_bp = Blueprint("budget", __name__)
 
@@ -358,6 +358,21 @@ def budget_home():
             Decimal(str(pi.amount)) for pi in income_map.values()
         )
 
+        # Budget line items (sub-items under each category, monthly only)
+        cids = [cat.id for cat in categories]
+        if period == "monthly":
+            li_rows = BudgetLineItem.query.filter(
+                BudgetLineItem.branch_id.in_(bids),
+                BudgetLineItem.category_id.in_(cids),
+                BudgetLineItem.year == year,
+                BudgetLineItem.month == month,
+            ).order_by(BudgetLineItem.sort_order, BudgetLineItem.id).all()
+            line_items_map = {}
+            for li in li_rows:
+                line_items_map.setdefault((li.branch_id, li.category_id), []).append(li)
+        else:
+            line_items_map = {}
+
         return render_template(
             "budget.html",
             branches=branches, categories=categories,
@@ -365,6 +380,7 @@ def budget_home():
             total_budgeted=total_budgeted, total_actual=total_actual,
             income_map=income_map,
             total_projected_income=total_projected_income,
+            line_items_map=line_items_map,
             period=period, year=year, month=month, week=week,
             month_label=month_label,
             year_range=range(now.year - 1, now.year + 3),
@@ -556,6 +572,71 @@ def save_income():
         db.session.commit()
         return jsonify(ok=True, amount=float(amount))
 
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=str(e)), 500
+
+
+# ── budget line items (sub-items) ─────────────────────────────────────────────
+
+@budget_bp.route("/budget/line-item/save", methods=["POST"])
+@login_required
+def save_line_item():
+    try:
+        branch_id   = int(request.form["branch_id"])
+        category_id = int(request.form["category_id"])
+        year        = int(request.form["year"])
+        month       = int(request.form["month"])
+        name        = request.form.get("name", "").strip()
+        item_id_raw = request.form.get("id", "").strip()
+
+        if not name:
+            return jsonify(ok=False, error="Name is required"), 400
+        if branch_id not in _allowed_branch_ids():
+            return jsonify(ok=False, error="Not authorised for this branch"), 403
+
+        raw = request.form.get("amount", "0").replace(",", "").strip()
+        try:
+            amount = Decimal(raw) if raw else Decimal("0")
+        except InvalidOperation:
+            return jsonify(ok=False, error="Invalid amount"), 400
+
+        if item_id_raw:
+            li = BudgetLineItem.query.get_or_404(int(item_id_raw))
+            if li.branch_id != branch_id:
+                return jsonify(ok=False, error="Access denied"), 403
+            li.name       = name
+            li.amount     = amount
+            li.updated_at = datetime.now(timezone.utc)
+        else:
+            li = BudgetLineItem(
+                branch_id=branch_id, category_id=category_id,
+                year=year, month=month,
+                name=name, amount=amount,
+                created_by=current_user.id,
+            )
+            db.session.add(li)
+
+        db.session.commit()
+        return jsonify(ok=True, id=li.id, name=li.name, amount=float(li.amount))
+
+    except Exception as e:
+        try: db.session.rollback()
+        except Exception: pass
+        return jsonify(ok=False, error=str(e)), 500
+
+
+@budget_bp.route("/budget/line-item/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_line_item(item_id):
+    try:
+        li = BudgetLineItem.query.get_or_404(item_id)
+        if li.branch_id not in _allowed_branch_ids():
+            return jsonify(ok=False, error="Access denied"), 403
+        db.session.delete(li)
+        db.session.commit()
+        return jsonify(ok=True)
     except Exception as e:
         try: db.session.rollback()
         except Exception: pass
