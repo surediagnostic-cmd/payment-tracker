@@ -66,7 +66,7 @@
           <td><a href="{{ url_for('inventory.item_detail', item_id=item.id) }}" style="color:var(--orange2);">{{ item.name }}</a></td>
           <td><span class="badge badge-gray">{{ item.category_label }}</span></td>
           <td style="color:var(--red); font-weight:700;">{{ (total or 0)|round(2) }} {{ item.unit }}</td>
-          <td style="color:var(--muted);">{{ item.reorder_level }} {{ item.unit }}</td>
+          <td style="color:var(--muted);">{{ (item.reorder_level | int) if item.reorder_level else '—' }} {{ item.unit }}</td>
         </tr>
         {% endfor %}
       </tbody>
