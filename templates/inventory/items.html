@@ -25,7 +25,12 @@
 
 {# Filters #}
 <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
-  <input name="q" value="{{ q }}" placeholder="Search items…" class="inp" style="width:220px;">
+  <div style="position:relative;">
+    <input name="q" id="q-inp" value="{{ q }}" placeholder="Search items…" class="inp" style="width:220px; padding-right:30px;" autocomplete="off" oninput="liveFilter()">
+    <span id="q-clear" onclick="document.getElementById('q-inp').value='';liveFilter();"
+          style="display:none; position:absolute; right:8px; top:50%; transform:translateY(-50%);
+                 cursor:pointer; color:var(--muted); font-size:16px; line-height:1; user-select:none;">×</span>
+  </div>
   <div class="filter-drop-wrap">
     <svg class="filter-drop-icon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
     <select name="cat" class="filter-drop" onchange="this.form.submit()">
@@ -35,7 +40,6 @@
       {% endfor %}
     </select>
   </div>
-  <button type="submit" class="btn-outline">Filter</button>
   {% if cat_filter or q %}<a href="{{ url_for('inventory.items') }}" class="btn-outline">Clear</a>{% endif %}
 </form>
 
@@ -47,7 +51,7 @@
     </tr></thead>
     <tbody>
       {% for item in items %}
-      <tr>
+      <tr data-search="{{ (item.name ~ ' ' ~ (item.item_code or '') ~ ' ' ~ item.category_label)|lower }}">
         <td><a href="{{ url_for('inventory.item_detail', item_id=item.id) }}" style="color:var(--orange2); font-weight:600;">{{ item.name }}</a></td>
         <td style="color:var(--muted);">{{ item.item_code or '—' }}</td>
         <td><span class="badge badge-gray">{{ item.category_label }}</span></td>
@@ -68,7 +72,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" style="text-align:center; color:var(--muted); padding:40px;">No items found</td></tr>
+      <tr id="no-results-row"><td colspan="9" style="text-align:center; color:var(--muted); padding:40px;">No items found</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -156,6 +160,22 @@
     </form>
   </div>
 </div>
+<script>
+function liveFilter() {
+  var q   = (document.getElementById('q-inp').value || '').toLowerCase().trim();
+  var clr = document.getElementById('q-clear');
+  if (clr) clr.style.display = q ? '' : 'none';
+  var rows = document.querySelectorAll('table tbody tr[data-search]');
+  var visible = 0;
+  rows.forEach(function(tr) {
+    var show = !q || tr.dataset.search.indexOf(q) !== -1;
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  // Show "no results" row if everything hidden
+  var empty = document.getElementById('no-results-row');
+  if (empty) empty.style.display = (visible === 0 && rows.length > 0) ? '' : 'none';
+}
+document.addEventListener('DOMContentLoaded', liveFilter);
+</script>
 {% endblock %}
-
-
