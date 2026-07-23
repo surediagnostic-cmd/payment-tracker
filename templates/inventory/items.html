@@ -59,7 +59,7 @@
         <td style="color:var(--muted);">{{ item.purchase_unit or '—' }}</td>
         <td style="color:var(--muted);">{{ item.pack_size or '—' }}</td>
         <td>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}</td>
-        <td style="color:var(--muted);">{{ item.reorder_level or '—' }}</td>
+        <td style="color:var(--muted);">{{ (item.reorder_level | int) if item.reorder_level else '—' }}</td>
         <td>
           {% set total = item.total_stock %}
           <span style="color:{% if item.is_low_stock %}var(--red){% elif total > 0 %}var(--green){% else %}var(--muted){% endif %}; font-weight:600;">
