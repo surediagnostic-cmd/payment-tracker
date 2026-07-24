@@ -5,12 +5,22 @@
 <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
   <div>
     <h1 class="section-title">Test Catalogue</h1>
-    <div style="color:var(--muted); font-size:13px; margin-top:4px;">All investigations — map reagents consumed per test</div>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">All investigations — map reagents consumed per test &amp; track margins</div>
   </div>
-  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
-    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-    Add Test
-  </button>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <a href="{{ url_for('inventory.download_tests_template') }}" class="btn-outline" style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Download Template
+    </a>
+    <button onclick="document.getElementById('uploadModal').style.display='flex'" class="btn-outline" style="display:inline-flex; align-items:center; gap:6px; font-size:13px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload CSV
+    </button>
+    <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      Add Test
+    </button>
+  </div>
 </div>
 
 <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
@@ -35,14 +45,31 @@
 <div class="card" style="overflow:hidden;">
   <table>
     <thead><tr>
-      <th>Test Name</th><th>LIS Name</th><th>Case Type</th><th>Reagents Mapped</th><th>Status</th>
+      <th>Test Name</th><th>LIS Name</th><th>Case Type</th><th style="text-align:right;">Price (₦)</th><th style="text-align:right;">Reagent Cost</th><th style="text-align:right;">Margin</th><th>Reagents Mapped</th><th>Status</th>
     </tr></thead>
     <tbody>
       {% for test in tests %}
+      {% set cost = test.reagent_cost %}
+      {% set mgn  = test.margin %}
+      {% set mpct = test.margin_pct %}
       <tr data-search="{{ (test.name ~ ' ' ~ (test.labsmart_name or '') ~ ' ' ~ test.case_type_label)|lower }}">
         <td><a href="{{ url_for('inventory.test_detail', test_id=test.id) }}" style="color:var(--orange2); font-weight:600;">{{ test.name }}</a></td>
         <td style="color:var(--muted); font-size:12px;">{{ test.labsmart_name }}</td>
         <td><span class="badge badge-blue">{{ test.case_type_label }}</span></td>
+        <td style="text-align:right; color:var(--white);">
+          {% if test.price %}₦{{ '{:,.2f}'.format(test.price | float) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}
+        </td>
+        <td style="text-align:right; color:var(--muted); font-size:12px;">
+          {% if cost > 0 %}₦{{ '{:,.2f}'.format(cost) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}
+        </td>
+        <td style="text-align:right;">
+          {% if mpct is not none %}
+          <span style="font-weight:700; color:{% if mpct >= 50 %}var(--green){% elif mpct >= 20 %}var(--orange){% else %}var(--red){% endif %};">
+            {{ mpct }}%
+          </span>
+          <span style="color:var(--muted); font-size:11px; margin-left:4px;">₦{{ '{:,.0f}'.format(mgn) }}</span>
+          {% else %}<span style="color:var(--dim);">—</span>{% endif %}
+        </td>
         <td>
           {% set n = test.reagent_mappings|length %}
           {% if n > 0 %}<span class="badge badge-green">{{ n }} item{{ 's' if n != 1 }}</span>
@@ -51,10 +78,37 @@
         <td>{% if test.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr id="no-results-row"><td colspan="5" style="text-align:center; color:var(--muted); padding:40px;">No tests found</td></tr>
+      <tr id="no-results-row"><td colspan="8" style="text-align:center; color:var(--muted); padding:40px;">No tests found</td></tr>
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+{# Upload CSV Modal #}
+<div id="uploadModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:500px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Upload Test Catalogue CSV</div>
+      <button onclick="document.getElementById('uploadModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
+    </div>
+    <div style="background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px; font-size:12px; color:var(--muted); line-height:1.8;">
+      <strong style="color:var(--white);">Required columns (first row = header):</strong><br>
+      Test Name · LIS Name · Case Type · Price (N) · Active<br><br>
+      <strong style="color:var(--white);">Tips:</strong><br>
+      • Use <strong style="color:var(--orange2);">Download Template</strong> to get a pre-filled starting file.<br>
+      • Existing tests are matched by <em>LIS Name</em> first, then exact display name — they will be updated.<br>
+      • New rows are added; blank rows are skipped.<br>
+      • <em>Case Type</em> must be one of: lab, radiology, usg, ecg, other
+    </div>
+    <form method="post" action="{{ url_for('inventory.upload_tests_csv') }}" enctype="multipart/form-data">
+      <label class="label">CSV File *</label>
+      <input type="file" name="csv_file" accept=".csv" required class="inp" style="margin-bottom:16px;">
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn-primary">Upload &amp; Import</button>
+        <button type="button" onclick="document.getElementById('uploadModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 {# Add Test Modal #}
@@ -79,6 +133,10 @@
           <select name="case_type" class="inp">
             {% for val, label in CASE_TYPES %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
           </select>
+        </div>
+        <div>
+          <label class="label">Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— what patient pays</span></label>
+          <input name="price" class="inp" type="number" step="0.01" min="0" placeholder="e.g. 5000.00">
         </div>
       </div>
       <div style="display:flex; gap:10px; margin-top:20px;">
