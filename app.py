@@ -151,20 +151,27 @@ def create_app():
         fake_mds = type("U", (), {"is_mds": True, "is_authenticated": True,
                                   "can_view_inventory": True, "role": "mds",
                                   "name": "debug", "id": 0})()
+        import resource
+        def mem():
+            return f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // (1024*1024)}MB"
         try:
             from models import TestCatalogue
             if which == "tests":
+                n = request.args.get("n", "all")
                 tests = TestCatalogue.query.order_by(TestCatalogue.name).all()
-                steps.append(f"loaded {len(tests)} tests")
+                steps.append(f"loaded {len(tests)} tests (rss {mem()})")
+                if n != "all":
+                    tests = tests[:int(n)]
+                    steps.append(f"limited to {len(tests)}")
                 for t in tests:
                     _ = (t.reagent_cost, t.margin, t.margin_pct, t.branch_price_count,
-                         len(t.reagent_mappings), t.case_type_label, t.is_active, len(list(t.aliases)))
-                steps.append("data attrs OK")
+                         len(t.reagent_mappings), t.case_type_label, t.is_active)
+                steps.append(f"data attrs OK (rss {mem()})")
                 from models import CASE_TYPE_LABELS
                 html = render_template("inventory/tests.html", tests=tests,
                     type_filter="", q="", CASE_TYPES=list(CASE_TYPE_LABELS.items()),
                     current_user=fake_mds)
-                steps.append(f"template OK ({len(html)} bytes)")
+                steps.append(f"template OK ({len(html)} bytes, rss {mem()})")
             elif which == "detail":
                 t = TestCatalogue.query.order_by(TestCatalogue.name).first()
                 steps.append(f"test id={t.id if t else None}")
