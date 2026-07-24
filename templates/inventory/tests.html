@@ -150,11 +150,13 @@
       <button onclick="document.getElementById('aliasModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1;">×</button>
     </div>
     <div style="background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px; font-size:12px; color:var(--muted); line-height:1.8;">
-      Attach the HMO/branch billing variants (e.g. <em>MP IKEJA</em>, <em>MP NEM</em>) to existing tests so LabSmart uploads auto-match them all.<br><br>
+      Attach the HMO/branch billing variants (e.g. <em>MP IKEJA</em>, <em>MP NEM</em>) to existing tests, tag each with its branch, and optionally set that branch's price.<br><br>
       <strong style="color:var(--white);">Columns (first row = header):</strong><br>
-      <strong>Test</strong> · <strong>Aliases</strong><br><br>
+      <strong>Test</strong> · <strong>Alias</strong> · <strong>Branch</strong> · <strong>Set Price</strong> · <strong>Fee</strong><br><br>
       • <strong>Test</strong> — matched to an existing test by LIS name, then display name, then closest fuzzy match.<br>
-      • <strong>Aliases</strong> — one or more names separated by <strong style="color:var(--orange2);">|</strong> (pipe), since lab names often contain commas.<br>
+      • <strong>Alias</strong> — one LabSmart name per row (legacy pipe-separated <em>Aliases</em> column still accepted).<br>
+      • <strong>Branch</strong> — the branch this variant belongs to; a branch-labelled name → that branch, everything else → Ilasa.<br>
+      • <strong>Set Price</strong> = <em>yes</em> writes <strong>Fee</strong> as that branch's price — but only when the test matches <em>exactly</em> (loose matches are reported, never mis-priced).<br>
       • Names already mapped elsewhere are left untouched and reported.
     </div>
     <div style="margin-bottom:14px;">
