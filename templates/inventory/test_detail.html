@@ -182,6 +182,31 @@
   {% endif %}
 </div>
 
+{# Price Change History #}
+{% if price_audit %}
+<div class="card" style="padding:22px; margin-top:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Price Change History</div>
+  <table>
+    <thead><tr><th>Date</th><th>Type</th><th>Branch</th><th>Old Price</th><th>New Price</th><th>Changed By</th></tr></thead>
+    <tbody>
+      {% for a in price_audit %}
+      <tr>
+        <td style="font-size:12px; color:var(--muted);">{{ a.changed_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td>
+          {% if a.entity_type == 'test_default' %}<span class="badge badge-orange">Default</span>
+          {% else %}<span class="badge badge-blue">Branch</span>{% endif %}
+        </td>
+        <td style="color:var(--muted); font-size:12px;">{{ branch_map.get(a.branch_id, '—') if a.branch_id else '—' }}</td>
+        <td style="color:var(--muted);">{% if a.old_price is not none %}₦{{ '{:,.0f}'.format(a.old_price) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}</td>
+        <td style="font-weight:600; color:var(--white);">{% if a.new_price is not none %}₦{{ '{:,.0f}'.format(a.new_price) }}{% else %}<span style="color:var(--dim);">cleared</span>{% endif %}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.changer.name if a.changer else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {# Edit Modal #}
 <div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
   <div class="card" style="width:480px; max-width:95vw; padding:28px;">
