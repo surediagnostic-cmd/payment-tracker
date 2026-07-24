@@ -370,6 +370,26 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] test_catalogue price: {e}")
 
+    # 10. test_branch_prices table (per-branch price overrides)
+    if 'test_branch_prices' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE test_branch_prices (
+                    id         SERIAL PRIMARY KEY,
+                    test_id    INTEGER NOT NULL REFERENCES test_catalogue(id) ON DELETE CASCADE,
+                    branch_id  INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                    price      NUMERIC(12,2) NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    CONSTRAINT uq_test_branch_price UNIQUE (test_id, branch_id)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created test_branch_prices table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] test_branch_prices: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
