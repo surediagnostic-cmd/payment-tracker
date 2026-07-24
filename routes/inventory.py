@@ -14,6 +14,7 @@ from app import db
 from models import (
     Branch, User,
     InventoryItem, TestCatalogue, TestReagentMap, TestBranchPrice,
+    TestVolumeLog, PriceAuditLog,
     PackageCatalogue, PackageTest,
     StockLevel, StockTransaction,
     LisUpload, LisUploadRow, UnmatchedInvestigation,
@@ -71,6 +72,25 @@ def _mds_only(f):
             return redirect(url_for("inventory.dashboard"))
         return f(*args, **kwargs)
     return decorated
+
+
+# ── Audit helpers ────────────────────────────────────────────────────────────
+
+def _log_price(entity_type, entity_id, old_price, new_price, branch_id=None, notes=None):
+    """Record a price/cost change in price_audit_log."""
+    try:
+        entry = PriceAuditLog(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            branch_id=branch_id,
+            old_price=float(old_price) if old_price is not None else None,
+            new_price=float(new_price) if new_price is not None else None,
+            changed_by=current_user.id if current_user.is_authenticated else None,
+            notes=notes,
+        )
+        db.session.add(entry)
+    except Exception as e:
+        print(f"[audit] price log failed: {e}")
 
 
 # ── Stock helpers ─────────────────────────────────────────────────────────────
@@ -172,6 +192,24 @@ def dashboard():
     from models import InTransitStock
     in_transit_count = InTransitStock.query.filter_by(status="in_transit").count()
 
+    # Low-margin tests with recent volume (last 90 days)
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    vol_test_ids = {
+        row[0] for row in
+        db.session.query(TestVolumeLog.test_id)
+        .filter(TestVolumeLog.created_at >= cutoff).distinct().all()
+    }
+    low_margin_tests = []
+    if vol_test_ids:
+        for t in TestCatalogue.query.filter(
+            TestCatalogue.id.in_(vol_test_ids), TestCatalogue.is_active == True
+        ).all():
+            mpct = t.margin_pct
+            if mpct is not None and mpct < 30:
+                low_margin_tests.append((t, mpct))
+        low_margin_tests.sort(key=lambda x: x[1])
+
     return render_template("inventory/dashboard.html",
         total_items=total_items,
         pending_uploads=pending_uploads,
@@ -179,6 +217,7 @@ def dashboard():
         recent_txns=recent_txns,
         recent_uploads=recent_uploads,
         in_transit_count=in_transit_count,
+        low_margin_tests=low_margin_tests,
     )
 
 
@@ -246,9 +285,13 @@ def item_detail(item_id):
             .limit(30).all())
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
+    cost_audit = (PriceAuditLog.query
+                  .filter_by(entity_type="item_cost", entity_id=item_id)
+                  .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
     return render_template("inventory/item_detail.html",
         item=item, stock_levels=stock_levels, txns=txns,
         branches=branches, all_tests=all_tests,
+        cost_audit=cost_audit,
         ITEM_CATEGORIES=ITEM_CATEGORIES,
     )
 
@@ -264,11 +307,15 @@ def edit_item(item_id):
     item.unit     = request.form.get("unit", item.unit).strip() or item.unit
     pack          = request.form.get("pack_size", "").strip()
     purchase_unit = request.form.get("purchase_unit", "").strip() or None
-    price = request.form.get("unit_price", "").strip()
-    reorder= request.form.get("reorder_level", "").strip()
+    price_raw     = request.form.get("unit_price", "").strip()
+    reorder       = request.form.get("reorder_level", "").strip()
+    new_price     = float(price_raw) if price_raw else None
+    old_price     = float(item.unit_price) if item.unit_price is not None else None
+    if old_price != new_price:
+        _log_price("item_cost", item_id, old_price, new_price)
     item.pack_size     = int(pack) if pack else None
     item.purchase_unit = purchase_unit
-    item.unit_price    = float(price) if price else None
+    item.unit_price    = new_price
     item.reorder_level = float(reorder) if reorder else None
     item.notes         = request.form.get("notes", "").strip() or None
     db.session.commit()
@@ -340,10 +387,17 @@ def test_detail(test_id):
     all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
     branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     # build a lookup {branch_id: TestBranchPrice} for the template
-    bp_map    = {bp.branch_id: bp for bp in test.branch_prices}
+    bp_map      = {bp.branch_id: bp for bp in test.branch_prices}
+    price_audit = (PriceAuditLog.query
+                   .filter(PriceAuditLog.entity_type.in_(["test_default", "test_branch"]),
+                           PriceAuditLog.entity_id == test_id)
+                   .order_by(PriceAuditLog.changed_at.desc()).limit(30).all())
+    # Branch name lookup for audit log display
+    branch_map  = {b.id: b.name for b in branches}
     return render_template("inventory/test_detail.html",
         test=test, all_items=all_items, CASE_TYPES=CASE_TYPES,
         branches=branches, bp_map=bp_map,
+        price_audit=price_audit, branch_map=branch_map,
     )
 
 
@@ -356,10 +410,15 @@ def edit_test(test_id):
     test.labsmart_name = request.form.get("labsmart_name", test.labsmart_name).strip()
     test.case_type     = request.form.get("case_type", test.case_type)
     price_raw = request.form.get("price", "").strip().replace(",", "")
+    old_price = float(test.price) if test.price is not None else None
     try:
-        test.price = Decimal(price_raw) if price_raw else None
+        new_price = Decimal(price_raw) if price_raw else None
     except Exception:
-        pass
+        new_price = test.price
+    if (float(new_price) if new_price is not None else None) != old_price:
+        _log_price("test_default", test_id, old_price,
+                   float(new_price) if new_price is not None else None)
+    test.price = new_price
     db.session.commit()
     flash(f"Test '{test.name}' updated.", "success")
     return redirect(url_for("inventory.test_detail", test_id=test_id))
@@ -522,6 +581,8 @@ def set_branch_price(test_id):
         flash("Invalid price value.", "error")
         return redirect(url_for("inventory.test_detail", test_id=test_id))
 
+    old_price = float(existing.price) if existing else None
+    _log_price("test_branch", test_id, old_price, float(price), branch_id=branch_id)
     if existing:
         existing.price      = price
         existing.updated_by = current_user.id
@@ -586,11 +647,16 @@ def packages():
 def add_package():
     name     = request.form.get("name", "").strip()
     lis_name = request.form.get("labsmart_name", "").strip()
+    price_s  = request.form.get("price", "").strip()
     if not name or not lis_name:
         flash("Package name and LIS name are required.", "error")
         return redirect(url_for("inventory.packages"))
-    p = PackageCatalogue(name=name, labsmart_name=lis_name)
+    price = float(price_s) if price_s else None
+    p = PackageCatalogue(name=name, labsmart_name=lis_name, price=price)
     db.session.add(p)
+    db.session.flush()
+    if price is not None:
+        _log_price("package", p.id, None, price)
     db.session.commit()
     flash(f"Package '{name}' added.", "success")
     return redirect(url_for("inventory.package_detail", pkg_id=p.id))
@@ -600,11 +666,15 @@ def add_package():
 @login_required
 @_inventory_access
 def package_detail(pkg_id):
-    pkg       = PackageCatalogue.query.get_or_404(pkg_id)
-    all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
-    linked_ids= {pt.test_id for pt in pkg.tests}
+    pkg         = PackageCatalogue.query.get_or_404(pkg_id)
+    all_tests   = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
+    linked_ids  = {pt.test_id for pt in pkg.tests}
+    price_audit = (PriceAuditLog.query
+                   .filter_by(entity_type="package", entity_id=pkg_id)
+                   .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
     return render_template("inventory/package_detail.html",
         package=pkg, all_tests=all_tests, linked_ids=linked_ids,
+        price_audit=price_audit,
     )
 
 
@@ -615,6 +685,12 @@ def edit_package(pkg_id):
     pkg = PackageCatalogue.query.get_or_404(pkg_id)
     pkg.name          = request.form.get("name", pkg.name).strip()
     pkg.labsmart_name = request.form.get("labsmart_name", pkg.labsmart_name).strip()
+    price_s   = request.form.get("price", "").strip()
+    new_price = float(price_s) if price_s else None
+    old_price = float(pkg.price) if pkg.price is not None else None
+    if new_price != old_price:
+        _log_price("package", pkg_id, old_price, new_price)
+    pkg.price = new_price
     db.session.commit()
     flash("Package updated.", "success")
     return redirect(url_for("inventory.package_detail", pkg_id=pkg_id))
@@ -933,7 +1009,9 @@ def apply_upload(upload_id):
             resolution_map[ui.raw_name.strip().lower()] = ui.resolved_test_id
 
     # Accumulate consumption: {(item_id, branch_id): total_qty}
-    consumption = {}
+    # Accumulate test volumes: {(test_id, branch_id): run_count}
+    consumption  = {}
+    test_volumes = {}
 
     for row in upload.rows:
         if row.is_cancelled or not row.investigations_raw:
@@ -950,6 +1028,8 @@ def apply_upload(upload_id):
             test = test_exact.get(key)
             if test:
                 _accumulate(consumption, test, branch_id)
+                vk = (test.id, branch_id)
+                test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
 
             # 2. Exact package match → expand to constituent tests
@@ -957,6 +1037,8 @@ def apply_upload(upload_id):
             if pkg:
                 for pt in pkg.tests:
                     _accumulate(consumption, pt.test, branch_id)
+                    vk = (pt.test_id, branch_id)
+                    test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
 
             # 3. Fuzzy auto-match (re-check threshold)
@@ -964,10 +1046,14 @@ def apply_upload(upload_id):
             best_p, p_score = _best_package_match(inv, all_pkgs)
             if t_score >= AUTO_MATCH_THRESHOLD:
                 _accumulate(consumption, best_t, branch_id)
+                vk = (best_t.id, branch_id)
+                test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
             if p_score >= AUTO_MATCH_THRESHOLD:
                 for pt in best_p.tests:
                     _accumulate(consumption, pt.test, branch_id)
+                    vk = (pt.test_id, branch_id)
+                    test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
 
             # 4. Resolved by user
@@ -976,12 +1062,22 @@ def apply_upload(upload_id):
                 t = TestCatalogue.query.get(resolved_test_id)
                 if t:
                     _accumulate(consumption, t, branch_id)
+                    vk = (t.id, branch_id)
+                    test_volumes[vk] = test_volumes.get(vk, 0) + 1
 
-    # Write transactions
+    # Write reagent consumption transactions
     ref = f"LIS-{upload.id}"
     for (item_id, branch_id), qty in consumption.items():
         _apply_txn(item_id=item_id, branch_id=branch_id, txn_type="consume",
                    qty=-abs(qty), user_id=current_user.id, reference=ref)
+
+    # Write test volume logs
+    upload_date = upload.created_at.date() if upload.created_at else None
+    for (test_id, branch_id), count in test_volumes.items():
+        db.session.add(TestVolumeLog(
+            test_id=test_id, branch_id=branch_id, upload_id=upload_id,
+            volume=count, period_start=upload_date, period_end=upload_date,
+        ))
 
     upload.status     = "applied"
     upload.applied_at = datetime.now(timezone.utc)
