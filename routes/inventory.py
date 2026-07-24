@@ -13,7 +13,7 @@ from sqlalchemy import func
 from app import db
 from models import (
     Branch, User,
-    InventoryItem, TestCatalogue, TestReagentMap,
+    InventoryItem, TestCatalogue, TestReagentMap, TestBranchPrice,
     PackageCatalogue, PackageTest,
     StockLevel, StockTransaction,
     LisUpload, LisUploadRow, UnmatchedInvestigation,
@@ -338,8 +338,12 @@ def add_test():
 def test_detail(test_id):
     test      = TestCatalogue.query.get_or_404(test_id)
     all_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+    branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    # build a lookup {branch_id: TestBranchPrice} for the template
+    bp_map    = {bp.branch_id: bp for bp in test.branch_prices}
     return render_template("inventory/test_detail.html",
         test=test, all_items=all_items, CASE_TYPES=CASE_TYPES,
+        branches=branches, bp_map=bp_map,
     )
 
 
@@ -367,15 +371,22 @@ def edit_test(test_id):
 def download_tests_template():
     import csv, io
     from models import TestCatalogue as TC
+    branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     si = io.StringIO()
     w  = csv.writer(si)
-    w.writerow(["Test Name", "LIS Name", "Case Type", "Price (N)", "Active"])
+    branch_headers = [f"Price ({b.name})" for b in branches]
+    w.writerow(["Test Name", "LIS Name", "Case Type", "Default Price (N)", "Active"] + branch_headers)
+    bp_index = {}  # {(test_id, branch_id): price}
+    from models import TestBranchPrice as TBP
+    for bp in TBP.query.all():
+        bp_index[(bp.test_id, bp.branch_id)] = float(bp.price)
     for t in TC.query.order_by(TC.name).all():
+        branch_prices = [bp_index.get((t.id, b.id), "") for b in branches]
         w.writerow([
             t.name, t.labsmart_name, t.case_type,
             float(t.price) if t.price else "",
             "Yes" if t.is_active else "No",
-        ])
+        ] + branch_prices)
     output = si.getvalue()
     from flask import make_response
     resp = make_response(output)
@@ -389,16 +400,29 @@ def download_tests_template():
 @_inventory_access
 def upload_tests_csv():
     import csv, io
-    from models import TestCatalogue as TC
+    from models import TestCatalogue as TC, TestBranchPrice as TBP
     file = request.files.get("csv_file")
     if not file or not file.filename:
         flash("No file selected.", "error")
         return redirect(url_for("inventory.tests"))
 
     VALID_TYPES = {v for v, _ in CASE_TYPES}
+    # Build branch lookup: "ijofi" → Branch object (match Price (BranchName) headers)
+    all_branches = {b.name.lower(): b for b in Branch.query.all()}
+
     try:
         raw    = file.read().decode("utf-8-sig", errors="replace")
         reader = csv.DictReader(io.StringIO(raw))
+        headers = [h.strip() for h in (reader.fieldnames or [])]
+        # Identify branch price columns: "Price (BranchName)"
+        branch_cols = {}  # header → Branch
+        for h in headers:
+            if h.lower().startswith("price (") and h.endswith(")"):
+                bname = h[7:-1].strip().lower()
+                b = all_branches.get(bname)
+                if b:
+                    branch_cols[h] = b
+
         added = updated = skipped = 0
         for row in reader:
             name     = (row.get("Test Name") or "").strip()
@@ -409,7 +433,7 @@ def upload_tests_csv():
             case_type  = (row.get("Case Type") or "lab").strip().lower()
             if case_type not in VALID_TYPES:
                 case_type = "lab"
-            price_raw  = (row.get("Price (N)") or "").replace(",", "").strip()
+            price_raw  = (row.get("Default Price (N)") or row.get("Price (N)") or "").replace(",", "").strip()
             active_raw = (row.get("Active") or "yes").strip().lower()
             is_active  = active_raw not in ("no", "false", "0")
             try:
@@ -420,9 +444,7 @@ def upload_tests_csv():
             # Match by LIS name first, then display name
             existing = None
             if lis_name:
-                existing = TC.query.filter(
-                    TC.labsmart_name.ilike(lis_name)
-                ).first()
+                existing = TC.query.filter(TC.labsmart_name.ilike(lis_name)).first()
             if not existing and name:
                 existing = TC.query.filter(TC.name.ilike(name)).first()
 
@@ -437,11 +459,32 @@ def upload_tests_csv():
                 if not name or not lis_name:
                     skipped += 1
                     continue
-                db.session.add(TC(
+                existing = TC(
                     name=name, labsmart_name=lis_name,
                     case_type=case_type, price=price, is_active=is_active,
-                ))
+                )
+                db.session.add(existing)
+                db.session.flush()
                 added += 1
+
+            # Handle branch prices
+            for col_header, branch in branch_cols.items():
+                bp_raw = (row.get(col_header) or "").replace(",", "").strip()
+                if not bp_raw:
+                    continue
+                try:
+                    bp_val = Decimal(bp_raw)
+                except Exception:
+                    continue
+                tbp = TBP.query.filter_by(test_id=existing.id, branch_id=branch.id).first()
+                if tbp:
+                    tbp.price = bp_val
+                    tbp.updated_by = current_user.id
+                else:
+                    db.session.add(TBP(
+                        test_id=existing.id, branch_id=branch.id,
+                        price=bp_val, updated_by=current_user.id,
+                    ))
 
         db.session.commit()
         flash(f"CSV imported — {added} added, {updated} updated, {skipped} skipped.", "success")
@@ -449,6 +492,50 @@ def upload_tests_csv():
         db.session.rollback()
         flash(f"Import failed: {e}", "error")
     return redirect(url_for("inventory.tests"))
+
+
+@inventory_bp.route("/tests/<int:test_id>/branch-price", methods=["POST"])
+@login_required
+@_inventory_access
+def set_branch_price(test_id):
+    test      = TestCatalogue.query.get_or_404(test_id)
+    branch_id = request.form.get("branch_id", type=int)
+    price_raw = request.form.get("price", "").strip().replace(",", "")
+    clear     = request.form.get("clear") == "1"
+
+    if not branch_id:
+        flash("Branch required.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    existing = TestBranchPrice.query.filter_by(test_id=test_id, branch_id=branch_id).first()
+
+    if clear or not price_raw:
+        if existing:
+            db.session.delete(existing)
+            db.session.commit()
+            flash("Branch price cleared — will use default price.", "success")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    try:
+        price = Decimal(price_raw)
+    except Exception:
+        flash("Invalid price value.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    if existing:
+        existing.price      = price
+        existing.updated_by = current_user.id
+        from datetime import datetime, timezone
+        existing.updated_at = datetime.now(timezone.utc)
+    else:
+        db.session.add(TestBranchPrice(
+            test_id=test_id, branch_id=branch_id,
+            price=price, updated_by=current_user.id,
+        ))
+    db.session.commit()
+    branch = Branch.query.get(branch_id)
+    flash(f"Price set for {branch.name}.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
 
 
 @inventory_bp.route("/tests/<int:test_id>/mappings/add", methods=["POST"])
