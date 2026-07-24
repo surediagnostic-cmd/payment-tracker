@@ -141,6 +141,30 @@ def create_app():
         except Exception as e:
             return f"<pre>debug error: {e}</pre>", 500
 
+    @app.route("/debug-verify")
+    def debug_verify():
+        """TEMPORARY: verify the eager-loaded tests list renders for all rows."""
+        import time, traceback
+        from flask import render_template
+        from sqlalchemy.orm import selectinload
+        t0 = time.time()
+        fake_mds = type("U", (), {"is_mds": True, "is_authenticated": True,
+                                  "can_view_inventory": True, "role": "mds",
+                                  "name": "debug", "id": 0})()
+        try:
+            from models import TestCatalogue, TestReagentMap, CASE_TYPE_LABELS
+            tests = (TestCatalogue.query.options(
+                        selectinload(TestCatalogue.reagent_mappings).selectinload(TestReagentMap.item),
+                        selectinload(TestCatalogue.branch_prices),
+                     ).order_by(TestCatalogue.name).all())
+            html = render_template("inventory/tests.html", tests=tests,
+                type_filter="", q="", CASE_TYPES=list(CASE_TYPE_LABELS.items()),
+                current_user=fake_mds)
+            return (f"<pre>OK: {len(tests)} tests, {len(html)} bytes, "
+                    f"{time.time()-t0:.2f}s</pre>"), 200
+        except Exception:
+            return f"<pre>{time.time()-t0:.2f}s\n{traceback.format_exc()}</pre>", 200
+
     return app
 
 
