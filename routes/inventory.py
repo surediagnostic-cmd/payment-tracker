@@ -146,18 +146,20 @@ def _best_package_match(name, all_pkgs):
 def _build_test_lookup(all_tests):
     """Exact-match lookup keyed by lowercased labsmart_name AND every alias.
 
-    Aliases are loaded first, then canonical labsmart_names, so that a canonical
-    name always wins if it happens to collide with an alias string. One bulk query
-    for aliases — no per-test round-trips.
+    Returns {name: (TestCatalogue, branch_id_or_None)}. labsmart_names are loaded
+    first with branch_id=None (→ fall back to the upload's collection centre); then
+    aliases override with their own branch_id, so a billing variant like "MP IKEJA"
+    both resolves to the malaria test AND carries the Ikeja attribution. One bulk
+    query for aliases — no per-test round-trips.
     """
     lookup = {}
     tests_by_id = {t.id: t for t in all_tests}
+    for t in all_tests:
+        lookup[t.labsmart_name.strip().lower()] = (t, None)
     for a in TestAlias.query.all():
         t = tests_by_id.get(a.test_id)
         if t and a.alias:
-            lookup[a.alias.strip().lower()] = t
-    for t in all_tests:
-        lookup[t.labsmart_name.strip().lower()] = t
+            lookup[a.alias.strip().lower()] = (t, a.branch_id)
     return lookup
 
 
@@ -541,12 +543,14 @@ def delete_test_alias(test_id, alias_id):
 @login_required
 @_inventory_access
 def download_aliases_template():
-    """Blank template for bulk alias import: one row per test, pipe-separated aliases."""
+    """Blank template for bulk alias import (one row per LabSmart name variant)."""
     si = io.StringIO()
     w  = csv.writer(si)
-    w.writerow(["Test", "Aliases (separate with |)"])
-    w.writerow(["MALARIA PARASITE(MP)", "MP | MP IKEJA | MP NEM | THT MP | MP LEADWAY"])
-    w.writerow(["BLOOD GROUP", "BLOOD GROUP (NEW) | BLOOD GROUP SURE IJOFI | BLOO GROUP REDEEMED"])
+    w.writerow(["Test", "Alias", "Branch", "Set Price", "Fee"])
+    w.writerow(["Malaria Parasite (MP)", "MP",       "ILASA", "yes", "3000"])
+    w.writerow(["Malaria Parasite (MP)", "MP IKEJA", "Ikeja", "yes", "4000"])
+    w.writerow(["Malaria Parasite (MP)", "MP NEM",   "ILASA", "no",  "2000"])
+    w.writerow(["Blood Group",           "BLOOD GROUP SURE IJOFI", "Ijofi", "yes", "2000"])
     resp = Response(si.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = "attachment; filename=test_aliases_template.csv"
     return resp
@@ -556,13 +560,21 @@ def download_aliases_template():
 @login_required
 @_inventory_access
 def import_aliases():
-    """Bulk-attach LabSmart name variants to existing tests.
+    """Bulk-attach LabSmart name variants (with branch attribution + pricing) to tests.
 
     CSV columns:
-      Test    — matched to an existing test by exact LIS name, then exact display
-                name, then fuzzy (>= AUTO_MATCH_THRESHOLD).
-      Aliases — one or more LabSmart names separated by '|' (pipe), because many
-                lab names legitimately contain commas.
+      Test      — matched to an existing test by exact LIS name, then exact display
+                  name, then fuzzy (>= AUTO_MATCH_THRESHOLD).
+      Alias     — one LabSmart name per row (preferred). The legacy 'Aliases' column
+                  (pipe-separated) is also accepted; those rows attach with no branch.
+      Branch    — the branch this variant belongs to (matched by name). Blank → none
+                  (the upload's collection centre decides at match time).
+      Set Price — 'yes' to write Fee as that branch's price override.
+      Fee       — the price to set when Set Price is yes.
+
+    Safety: a price is written ONLY when the test matched a catalogue entry EXACTLY
+    (LIS name or display name). Fuzzy-only matches still get the alias, but the price
+    is skipped and reported, so a loose match can never mis-price a real test.
     """
     file = request.files.get("csv_file")
     if not file or not file.filename:
@@ -573,33 +585,52 @@ def import_aliases():
         raw    = file.read().decode("utf-8-sig", errors="replace")
         reader = csv.DictReader(io.StringIO(raw))
         headers = [h.strip() for h in (reader.fieldnames or [])]
-        # tolerate any header that starts with "alias"
-        alias_col = next((h for h in headers if h.strip().lower().startswith("alias")), None)
-        test_col  = next((h for h in headers if h.strip().lower() in ("test", "test name", "lis name", "canonical")), None)
-        if not test_col or not alias_col:
-            flash("CSV must have a 'Test' column and an 'Aliases' column.", "error")
+
+        def find(*names):
+            for h in headers:
+                if h.strip().lower() in names:
+                    return h
+            return None
+        test_col   = find("test", "test name", "lis name", "canonical")
+        alias_col  = find("alias")
+        aliases_col= find("aliases", "aliases (separate with |)")
+        branch_col = find("branch")
+        setp_col   = find("set price", "setprice")
+        fee_col    = find("fee", "price")
+        if not test_col or not (alias_col or aliases_col):
+            flash("CSV must have a 'Test' column and an 'Alias' (or 'Aliases') column.", "error")
             return redirect(url_for("inventory.tests"))
 
-        all_tests = TestCatalogue.query.all()
-        by_lis  = {t.labsmart_name.strip().lower(): t for t in all_tests}
+        all_tests   = TestCatalogue.query.all()
+        by_lis  = {t.labsmart_name.strip().lower(): t for t in all_tests if t.labsmart_name}
         by_name = {t.name.strip().lower(): t for t in all_tests}
-        # Every name already claimed anywhere (LIS names + existing aliases)
-        claimed = {t.labsmart_name.strip().lower(): t for t in all_tests}
-        for a in TestAlias.query.all():
-            if a.alias:
-                claimed[a.alias.strip().lower()] = a.test
+        branches_by_name = {b.name.strip().lower(): b for b in Branch.query.all()}
 
-        added = skipped = conflicts = 0
+        # Existing aliases (as objects, so we can update branch on re-import)
+        alias_objs = {a.alias.strip().lower(): a for a in TestAlias.query.all()}
+        claimed_lis = set(by_lis.keys())
+        # Existing branch prices keyed by (test_id, branch_id) for overwrite
+        existing_tbp = {(r.test_id, r.branch_id): r for r in TestBranchPrice.query.all()}
+
+        added = updated = skipped = conflicts = prices_set = price_skipped_fuzzy = 0
         unmatched_rows = []
 
         for row in reader:
             test_key = (row.get(test_col) or "").strip()
-            aliases_raw = (row.get(alias_col) or "").strip()
-            if not test_key or not aliases_raw:
+            if not test_key:
+                continue
+            if alias_col:
+                aliases = [(row.get(alias_col) or "").strip()]
+            else:
+                aliases = [a.strip() for a in (row.get(aliases_col) or "").split("|")]
+            aliases = [a for a in aliases if a]
+            if not aliases:
                 continue
 
+            # Resolve the target test — track whether the match was exact
             k = test_key.lower()
             test = by_lis.get(k) or by_name.get(k)
+            exact = test is not None
             if not test:
                 best, score = _best_test_match(test_key, all_tests)
                 test = best if score >= AUTO_MATCH_THRESHOLD else None
@@ -607,30 +638,72 @@ def import_aliases():
                 unmatched_rows.append(test_key)
                 continue
 
-            for alias in aliases_raw.split("|"):
-                alias = alias.strip()
-                if not alias:
-                    continue
+            # Resolve branch (blank/unknown → None → collection centre at match time)
+            branch = None
+            if branch_col:
+                branch = branches_by_name.get((row.get(branch_col) or "").strip().lower())
+
+            for alias in aliases:
                 ak = alias.lower()
-                owner = claimed.get(ak)
-                if owner is not None:
-                    if owner.id != test.id:
-                        conflicts += 1   # name already maps to a different test — leave it
-                    else:
-                        skipped += 1     # already mapped to this test
+                if ak in claimed_lis:
+                    skipped += 1            # name is some test's primary LIS name — leave it
                     continue
-                db.session.add(TestAlias(test_id=test.id, alias=alias))
-                claimed[ak] = test
+                existing = alias_objs.get(ak)
+                if existing is not None:
+                    if existing.test_id != test.id:
+                        conflicts += 1       # already maps to a different test — leave it
+                    else:
+                        if branch is not None and existing.branch_id != branch.id:
+                            existing.branch_id = branch.id
+                            updated += 1
+                        else:
+                            skipped += 1
+                    continue
+                a = TestAlias(test_id=test.id, alias=alias,
+                              branch_id=branch.id if branch else None)
+                db.session.add(a)
+                alias_objs[ak] = a
                 added += 1
 
+            # Pricing — only on an EXACT test match, and only when asked
+            set_price = (row.get(setp_col) or "").strip().lower() in ("yes", "y", "true", "1") if setp_col else False
+            fee_raw   = (row.get(fee_col) or "").replace(",", "").strip() if fee_col else ""
+            if set_price and fee_raw and branch is not None:
+                if not exact:
+                    price_skipped_fuzzy += 1
+                    continue
+                try:
+                    fee = Decimal(fee_raw)
+                except Exception:
+                    continue
+                tbp = existing_tbp.get((test.id, branch.id))
+                if tbp is not None:
+                    old = float(tbp.price) if tbp.price is not None else None
+                    tbp.price = fee
+                    tbp.updated_by = current_user.id
+                    if old != float(fee):
+                        _log_price("test_branch", test.id, old, float(fee), branch_id=branch.id)
+                else:
+                    tbp = TestBranchPrice(test_id=test.id, branch_id=branch.id,
+                                          price=fee, updated_by=current_user.id)
+                    db.session.add(tbp)
+                    existing_tbp[(test.id, branch.id)] = tbp
+                    _log_price("test_branch", test.id, None, float(fee), branch_id=branch.id)
+                prices_set += 1
+
         db.session.commit()
-        msg = f"Alias import complete — {added} added, {skipped} already present, {conflicts} conflict(s)."
+        msg = (f"Aliases — {added} added, {updated} re-branched, {skipped} already present, "
+               f"{conflicts} conflict(s). Prices set: {prices_set}.")
+        warn = False
+        if price_skipped_fuzzy:
+            msg += f" {price_skipped_fuzzy} price(s) skipped (test matched loosely — set those manually)."
+            warn = True
         if unmatched_rows:
-            preview = ", ".join(unmatched_rows[:8]) + ("…" if len(unmatched_rows) > 8 else "")
-            msg += f" {len(unmatched_rows)} row(s) had no matching test: {preview}"
-            flash(msg, "warning")
-        else:
-            flash(msg, "success")
+            uniq = list(dict.fromkeys(unmatched_rows))
+            preview = ", ".join(uniq[:8]) + ("…" if len(uniq) > 8 else "")
+            msg += f" {len(uniq)} test(s) not found: {preview}"
+            warn = True
+        flash(msg, "warning" if warn else "success")
     except Exception as e:
         db.session.rollback()
         flash(f"Alias import failed: {e}", "error")
@@ -1291,11 +1364,14 @@ def apply_upload(upload_id):
                 continue
             key = inv.lower()
 
-            # 1. Exact test match
-            test = test_exact.get(key)
-            if test:
-                _accumulate(consumption, test, branch_id)
-                vk = (test.id, branch_id)
+            # 1. Exact test / alias match. An alias may carry its own branch (the
+            #    HMO/branch billing variant); use it, else the row's collection centre.
+            hit = test_exact.get(key)
+            if hit:
+                test, alias_branch = hit
+                b = alias_branch if alias_branch is not None else branch_id
+                _accumulate(consumption, test, b)
+                vk = (test.id, b)
                 test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
 
