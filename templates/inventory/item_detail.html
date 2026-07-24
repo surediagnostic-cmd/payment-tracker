@@ -25,10 +25,10 @@
       <div><span style="color:var(--muted);">Unit:</span> <strong>{{ item.unit }}</strong></div>
       <div><span style="color:var(--muted);">Pack Size:</span> <strong>{{ item.pack_size or '—' }}</strong>{% if item.purchase_unit %} <span style="color:var(--muted); font-size:.82rem;">(per {{ item.purchase_unit }})</span>{% endif %}</div>
       <div><span style="color:var(--muted);">Unit Price:</span> <strong>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}—{% endif %}</strong></div>
-      <div><span style="color:var(--muted);">Reorder Level:</span> <strong>{{ item.reorder_level or '—' }} {{ item.unit if item.reorder_level else '' }}</strong></div>
+      <div><span style="color:var(--muted);">Reorder Level:</span> <strong>{{ (item.reorder_level | float | round(0) | int) if item.reorder_level else '—' }} {{ item.unit if item.reorder_level else '' }}</strong></div>
       <div style="grid-column:1/-1;"><span style="color:var(--muted);">Total Stock:</span>
         <strong style="color:{% if item.is_low_stock %}var(--red){% elif item.total_stock > 0 %}var(--green){% else %}var(--muted){% endif %};">
-          {{ item.total_stock|round(2) }} {{ item.unit }}{% if item.is_low_stock %} ⚠ Low{% endif %}
+          {{ (item.total_stock | float | round(2)) }} {{ item.unit }}{% if item.is_low_stock %} ⚠ Low{% endif %}
         </strong>
       </div>
       {% if item.notes %}<div style="grid-column:1/-1; color:var(--muted);">{{ item.notes }}</div>{% endif %}
