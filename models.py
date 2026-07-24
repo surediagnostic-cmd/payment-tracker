@@ -251,6 +251,7 @@ class TestCatalogue(db.Model):
     reagent_mappings = db.relationship('TestReagentMap',  back_populates='test', cascade='all, delete-orphan', lazy=True)
     package_links    = db.relationship('PackageTest',      back_populates='test', cascade='all, delete-orphan', lazy=True)
     branch_prices    = db.relationship('TestBranchPrice',  back_populates='test', cascade='all, delete-orphan', lazy=True)
+    aliases          = db.relationship('TestAlias',        back_populates='test', cascade='all, delete-orphan', lazy=True)
 
     @property
     def case_type_label(self):
@@ -318,6 +319,27 @@ class TestReagentMap(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('test_id', 'item_id', name='uq_test_reagent'),
+    )
+
+
+class TestAlias(db.Model):
+    """Alternate LabSmart names (HMO / branch billing variants) that all map to one test.
+
+    LabSmart creates a separately-named billable investigation for every rate/HMO,
+    so a single test can surface under many names in an export (e.g. MP, MP IKEJA,
+    MP NEM, THT MP). Aliases let all of them resolve to one catalogue test for
+    reagent depletion and volume logging.
+    """
+    __tablename__ = "test_aliases"
+    id         = db.Column(db.Integer, primary_key=True)
+    test_id    = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='CASCADE'), nullable=False)
+    alias      = db.Column(db.String(300), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    test = db.relationship('TestCatalogue', back_populates='aliases')
+
+    __table_args__ = (
+        db.UniqueConstraint('alias', name='uq_test_alias_name'),
     )
 
 
