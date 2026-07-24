@@ -243,6 +243,7 @@ class TestCatalogue(db.Model):
     name          = db.Column(db.String(300), nullable=False)
     labsmart_name = db.Column(db.String(300), nullable=False)
     case_type     = db.Column(db.String(20),  nullable=False, default='lab')
+    sub_category  = db.Column(db.String(200), nullable=True)
     price         = db.Column(db.Numeric(12, 2), nullable=True)
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
