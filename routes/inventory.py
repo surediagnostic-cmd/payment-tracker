@@ -434,7 +434,7 @@ def download_tests_template():
     si = io.StringIO()
     w  = csv.writer(si)
     branch_headers = [f"Price ({b.name})" for b in branches]
-    w.writerow(["Test Name", "LIS Name", "Case Type", "Default Price (N)", "Active"] + branch_headers)
+    w.writerow(["Test Name", "LIS Name", "Case Type", "Sub-Category", "Default Price (N)", "Active"] + branch_headers)
     bp_index = {}  # {(test_id, branch_id): price}
     from models import TestBranchPrice as TBP
     for bp in TBP.query.all():
@@ -443,6 +443,7 @@ def download_tests_template():
         branch_prices = [bp_index.get((t.id, b.id), "") for b in branches]
         w.writerow([
             t.name, t.labsmart_name, t.case_type,
+            t.sub_category or "",
             float(t.price) if t.price else "",
             "Yes" if t.is_active else "No",
         ] + branch_prices)
@@ -489,10 +490,11 @@ def upload_tests_csv():
             if not name and not lis_name:
                 skipped += 1
                 continue
-            case_type  = (row.get("Case Type") or "lab").strip().lower()
+            case_type    = (row.get("Case Type") or "lab").strip().lower()
             if case_type not in VALID_TYPES:
                 case_type = "lab"
-            price_raw  = (row.get("Default Price (N)") or row.get("Price (N)") or "").replace(",", "").strip()
+            sub_category = (row.get("Sub-Category") or "").strip() or None
+            price_raw    = (row.get("Default Price (N)") or row.get("Price (N)") or "").replace(",", "").strip()
             active_raw = (row.get("Active") or "yes").strip().lower()
             is_active  = active_raw not in ("no", "false", "0")
             try:
@@ -510,9 +512,10 @@ def upload_tests_csv():
             if existing:
                 if name:          existing.name          = name
                 if lis_name:      existing.labsmart_name = lis_name
-                existing.case_type = case_type
-                existing.price     = price
-                existing.is_active = is_active
+                existing.case_type    = case_type
+                existing.sub_category = sub_category
+                existing.price        = price
+                existing.is_active    = is_active
                 updated += 1
             else:
                 if not name or not lis_name:
@@ -520,7 +523,8 @@ def upload_tests_csv():
                     continue
                 existing = TC(
                     name=name, labsmart_name=lis_name,
-                    case_type=case_type, price=price, is_active=is_active,
+                    case_type=case_type, sub_category=sub_category,
+                    price=price, is_active=is_active,
                 )
                 db.session.add(existing)
                 db.session.flush()
