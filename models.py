@@ -319,15 +319,69 @@ class TestReagentMap(db.Model):
     )
 
 
+class TestVolumeLog(db.Model):
+    """Test run counts recorded when a LIS upload is applied."""
+    __tablename__ = "test_volume_logs"
+    id          = db.Column(db.Integer, primary_key=True)
+    test_id     = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='CASCADE'), nullable=False)
+    branch_id   = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    upload_id   = db.Column(db.Integer, db.ForeignKey('lis_uploads.id', ondelete='SET NULL'), nullable=True)
+    volume      = db.Column(db.Integer, nullable=False, default=0)
+    period_start= db.Column(db.Date, nullable=True)
+    period_end  = db.Column(db.Date, nullable=True)
+    created_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    test   = db.relationship('TestCatalogue', backref='volume_logs')
+    branch = db.relationship('Branch')
+
+
+class PriceAuditLog(db.Model):
+    """Unified audit trail for test/branch/package price and item unit-cost changes."""
+    __tablename__ = "price_audit_log"
+    id          = db.Column(db.Integer, primary_key=True)
+    # entity_type: 'test_default' | 'test_branch' | 'package' | 'item_cost'
+    entity_type = db.Column(db.String(20),  nullable=False)
+    entity_id   = db.Column(db.Integer,     nullable=False)
+    branch_id   = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    old_price   = db.Column(db.Numeric(14, 2), nullable=True)
+    new_price   = db.Column(db.Numeric(14, 2), nullable=True)
+    changed_by  = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    changed_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    notes       = db.Column(db.String(300), nullable=True)
+
+    branch  = db.relationship('Branch')
+    changer = db.relationship('User', foreign_keys=[changed_by])
+
+
 class PackageCatalogue(db.Model):
     __tablename__ = "package_catalogue"
     id            = db.Column(db.Integer, primary_key=True)
     name          = db.Column(db.String(300), nullable=False)
     labsmart_name = db.Column(db.String(300), nullable=False)
+    price         = db.Column(db.Numeric(12, 2), nullable=True)
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     tests = db.relationship('PackageTest', back_populates='package', cascade='all, delete-orphan', lazy=True)
+
+    @property
+    def reagent_cost(self):
+        return sum(pt.test.reagent_cost for pt in self.tests if pt.test)
+
+    @property
+    def margin(self):
+        if self.price is None:
+            return None
+        return round(float(self.price) - self.reagent_cost, 2)
+
+    @property
+    def margin_pct(self):
+        if not self.price or float(self.price) == 0:
+            return None
+        m = self.margin
+        if m is None:
+            return None
+        return round((m / float(self.price)) * 100, 1)
 
 
 class PackageTest(db.Model):
