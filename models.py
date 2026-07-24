@@ -22,7 +22,7 @@ class Category(db.Model):
     __tablename__ = "categories"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
-    cost_type = db.Column(db.String(20), nullable=False, default='overhead')  # 'direct_cost' | 'overhead'
+    cost_type = db.Column(db.String(20), nullable=False, default='overhead')
     is_active = db.Column(db.Boolean, default=True)
 
 
@@ -33,7 +33,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(150), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="accountant")
-    branch_id = db.Column(db.Integer, nullable=True)  # kept for compatibility
+    branch_id = db.Column(db.Integer, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     branches = db.relationship('Branch', secondary=user_branches, backref='accountants')
@@ -53,7 +53,6 @@ class User(UserMixin, db.Model):
 
     @property
     def branch(self):
-        """Backward-compat helper — returns the first assigned branch or None."""
         return self.branches[0] if self.branches else None
 
 
@@ -82,7 +81,6 @@ class PaymentRequest(db.Model):
     def generate_reference(branch_id):
         now = datetime.now(timezone.utc)
         prefix = f"PAY-{now.strftime('%Y%m')}"
-        # Use MAX over the numeric suffix so gaps/ghost rows don't collide
         existing = db.session.query(PaymentRequest.reference)\
             .filter(PaymentRequest.reference.like(f"{prefix}-%")).all()
         max_num = 0
@@ -106,8 +104,6 @@ class PaymentRequestItem(db.Model):
     __tablename__ = "payment_request_items"
     id = db.Column(db.Integer, primary_key=True)
     request_id = db.Column(db.Integer, db.ForeignKey('payment_requests.id'), nullable=False)
-    # Self-referential FK: NULL = top-level item, non-NULL = sub-item of parent
-    # ON DELETE SET NULL so deleting a parent item doesn't violate FK on siblings
     parent_id = db.Column(
         db.Integer,
         db.ForeignKey('payment_request_items.id', ondelete='SET NULL'),
@@ -117,16 +113,12 @@ class PaymentRequestItem(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
     rate = db.Column(db.Numeric(14, 2), nullable=False)
-    # Optional link to inventory item — enables in-transit tracking
     inventory_item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='SET NULL'), nullable=True)
     qty_ordered       = db.Column(db.Numeric(14, 4), nullable=True)
     inventory_item    = db.relationship('InventoryItem', foreign_keys=[inventory_item_id])
-    # For parent items with children: amount stored as 0; children carry the actual amounts.
-    # This prevents double-counting in financial aggregations.
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     notes = db.Column(db.String(500), nullable=True)
     category = db.relationship('Category')
-    # Children (sub-items) of this item
     children = db.relationship(
         'PaymentRequestItem',
         primaryjoin='PaymentRequestItem.parent_id == PaymentRequestItem.id',
@@ -136,7 +128,6 @@ class PaymentRequestItem(db.Model):
 
     @property
     def display_amount(self):
-        """Amount to display: sum of children for group-header items, else own amount."""
         try:
             if self.children:
                 return sum(float(c.amount) for c in self.children)
@@ -146,25 +137,14 @@ class PaymentRequestItem(db.Model):
 
 
 class Budget(db.Model):
-    """Planned spending per branch + category + period.
-
-    period_type | year | month | week
-    'monthly'   |  Y   |   Y   | null  → one calendar month
-    'yearly'    |  Y   | null  | null  → full calendar year
-    'weekly'    |  Y   |   Y   |  Y   → week 1-4 of a month
-                                         week 1 = days 1-7
-                                         week 2 = days 8-14
-                                         week 3 = days 15-21
-                                         week 4 = days 22-end
-    """
     __tablename__ = "budgets"
     id = db.Column(db.Integer, primary_key=True)
     branch_id   = db.Column(db.Integer, db.ForeignKey("branches.id"),  nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=False)
-    period_type = db.Column(db.String(10), nullable=False)   # monthly | yearly | weekly
+    period_type = db.Column(db.String(10), nullable=False)
     year        = db.Column(db.Integer, nullable=False)
-    month       = db.Column(db.Integer, nullable=True)       # 1-12
-    week        = db.Column(db.Integer, nullable=True)       # 1-4
+    month       = db.Column(db.Integer, nullable=True)
+    week        = db.Column(db.Integer, nullable=True)
     amount      = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     notes       = db.Column(db.Text, nullable=True)
     created_by  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
@@ -237,6 +217,25 @@ class InventoryItem(db.Model):
         return self.total_stock < float(self.reorder_level)
 
 
+class TestBranchPrice(db.Model):
+    """Per-branch price override for a test. Falls back to TestCatalogue.price when absent."""
+    __tablename__ = "test_branch_prices"
+    id        = db.Column(db.Integer, primary_key=True)
+    test_id   = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='CASCADE'), nullable=False)
+    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='CASCADE'), nullable=False)
+    price     = db.Column(db.Numeric(12, 2), nullable=False)
+    updated_at= db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_by= db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+    test   = db.relationship('TestCatalogue', back_populates='branch_prices')
+    branch = db.relationship('Branch')
+    editor = db.relationship('User', foreign_keys=[updated_by])
+
+    __table_args__ = (
+        db.UniqueConstraint('test_id', 'branch_id', name='uq_test_branch_price'),
+    )
+
+
 class TestCatalogue(db.Model):
     __tablename__ = "test_catalogue"
     id            = db.Column(db.Integer, primary_key=True)
@@ -247,8 +246,9 @@ class TestCatalogue(db.Model):
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    reagent_mappings = db.relationship('TestReagentMap', back_populates='test', cascade='all, delete-orphan', lazy=True)
-    package_links    = db.relationship('PackageTest',     back_populates='test', cascade='all, delete-orphan', lazy=True)
+    reagent_mappings = db.relationship('TestReagentMap',  back_populates='test', cascade='all, delete-orphan', lazy=True)
+    package_links    = db.relationship('PackageTest',      back_populates='test', cascade='all, delete-orphan', lazy=True)
+    branch_prices    = db.relationship('TestBranchPrice',  back_populates='test', cascade='all, delete-orphan', lazy=True)
 
     @property
     def case_type_label(self):
@@ -256,29 +256,52 @@ class TestCatalogue(db.Model):
 
     @property
     def reagent_cost(self):
-        """Total reagent cost per test run (sum of qty_per_test × unit_price for all mapped items)."""
         total = 0.0
         for m in self.reagent_mappings:
             if m.item and m.item.unit_price:
                 total += float(m.qty_per_test) * float(m.item.unit_price)
         return total
 
+    def price_for_branch(self, branch_id):
+        """Effective price: branch override if set, else default price."""
+        for bp in self.branch_prices:
+            if bp.branch_id == branch_id:
+                return float(bp.price)
+        return float(self.price) if self.price else None
+
+    def margin_for_branch(self, branch_id):
+        price = self.price_for_branch(branch_id)
+        if price is None:
+            return None
+        return round(price - self.reagent_cost, 2)
+
+    def margin_pct_for_branch(self, branch_id):
+        price = self.price_for_branch(branch_id)
+        if not price or price == 0:
+            return None
+        m = self.margin_for_branch(branch_id)
+        if m is None:
+            return None
+        return round((m / price) * 100, 1)
+
     @property
     def margin(self):
-        """Revenue minus reagent cost (₦)."""
         if self.price is None:
             return None
         return round(float(self.price) - self.reagent_cost, 2)
 
     @property
     def margin_pct(self):
-        """Margin as % of price."""
         if not self.price or float(self.price) == 0:
             return None
         m = self.margin
         if m is None:
             return None
         return round((m / float(self.price)) * 100, 1)
+
+    @property
+    def branch_price_count(self):
+        return len(self.branch_prices)
 
 
 class TestReagentMap(db.Model):
@@ -338,8 +361,8 @@ class StockTransaction(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
     item_id      = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
     branch_id    = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
-    txn_type     = db.Column(db.String(20), nullable=False)   # receive|consume|adjust|writeoff
-    qty          = db.Column(db.Numeric(14, 4), nullable=False)  # positive=in, negative=out
+    txn_type     = db.Column(db.String(20), nullable=False)
+    qty          = db.Column(db.Numeric(14, 4), nullable=False)
     unit_cost    = db.Column(db.Numeric(14, 2), nullable=True)
     batch_number = db.Column(db.String(100), nullable=True)
     expiry_date  = db.Column(db.Date, nullable=True)
@@ -361,7 +384,7 @@ class LisUpload(db.Model):
     record_count   = db.Column(db.Integer, default=0)
     matched_count  = db.Column(db.Integer, default=0)
     unmatched_count= db.Column(db.Integer, default=0)
-    status         = db.Column(db.String(20), default='pending_review')  # pending_review|applied
+    status         = db.Column(db.String(20), default='pending_review')
     start_date     = db.Column(db.Date, nullable=True)
     end_date       = db.Column(db.Date, nullable=True)
     created_at     = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -399,7 +422,7 @@ class UnmatchedInvestigation(db.Model):
     resolved_test_id = db.Column(db.Integer, db.ForeignKey('test_catalogue.id', ondelete='SET NULL'), nullable=True)
     resolved_by      = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     resolved_at      = db.Column(db.DateTime, nullable=True)
-    action           = db.Column(db.String(20), default='pending')  # pending|mapped|skipped
+    action           = db.Column(db.String(20), default='pending')
 
     upload         = db.relationship('LisUpload',    back_populates='unmatched')
     suggested_test = db.relationship('TestCatalogue', foreign_keys=[suggested_test_id])
@@ -412,7 +435,7 @@ class ProjectedIncome(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     branch_id  = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
     year       = db.Column(db.Integer, nullable=False)
-    month      = db.Column(db.Integer, nullable=True)  # None = yearly total
+    month      = db.Column(db.Integer, nullable=True)
     amount     = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     notes      = db.Column(db.String(500), nullable=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
@@ -430,7 +453,7 @@ class InTransitStock(db.Model):
     inventory_item_id       = db.Column(db.Integer, db.ForeignKey('inventory_items.id', ondelete='CASCADE'), nullable=False)
     branch_id               = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
     qty                     = db.Column(db.Numeric(14, 4), nullable=False)
-    status                  = db.Column(db.String(20), default='in_transit')  # in_transit|received|cancelled
+    status                  = db.Column(db.String(20), default='in_transit')
     confirmed_by            = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     confirmed_at            = db.Column(db.DateTime, nullable=True)
     created_at              = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -440,8 +463,6 @@ class InTransitStock(db.Model):
     branch           = db.relationship('Branch')
     confirmer        = db.relationship('User', foreign_keys=[confirmed_by])
 
-
-# ── Feature #4: Budget Line Items (sub-items) ─────────────────────────────────
 
 class BudgetLineItem(db.Model):
     __tablename__ = "budget_line_items"
@@ -477,12 +498,12 @@ class RevenueShareRecipient(db.Model):
 class RevenueSharePeriod(db.Model):
     __tablename__ = "revenue_share_periods"
     id            = db.Column(db.Integer, primary_key=True)
-    label         = db.Column(db.String(100), nullable=False)   # e.g. "July 2026 (Week 1)"
+    label         = db.Column(db.String(100), nullable=False)
     branch_id     = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
     gross_revenue = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     period_start  = db.Column(db.Date, nullable=True)
     period_end    = db.Column(db.Date, nullable=True)
-    status        = db.Column(db.String(20), default='draft')   # draft|finalised
+    status        = db.Column(db.String(20), default='draft')
     notes         = db.Column(db.Text, nullable=True)
     created_by    = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -516,8 +537,6 @@ class RevenueShareAllocation(db.Model):
     payment_request    = db.relationship('PaymentRequest')
 
 
-
-
 class BranchAllocationTemplate(db.Model):
     """Management-approved default % split per branch, used to pre-populate weekly runs."""
     __tablename__ = "branch_allocation_templates"
@@ -530,5 +549,3 @@ class BranchAllocationTemplate(db.Model):
     branch       = db.relationship('Branch')
     recipient    = db.relationship('RevenueShareRecipient')
     __table_args__ = (db.UniqueConstraint('branch_id', 'recipient_id', name='uq_bat_branch_recipient'),)
-
-
