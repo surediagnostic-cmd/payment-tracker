@@ -243,6 +243,7 @@ class TestCatalogue(db.Model):
     name          = db.Column(db.String(300), nullable=False)
     labsmart_name = db.Column(db.String(300), nullable=False)
     case_type     = db.Column(db.String(20),  nullable=False, default='lab')
+    price         = db.Column(db.Numeric(12, 2), nullable=True)
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -252,6 +253,32 @@ class TestCatalogue(db.Model):
     @property
     def case_type_label(self):
         return CASE_TYPE_LABELS.get(self.case_type, self.case_type)
+
+    @property
+    def reagent_cost(self):
+        """Total reagent cost per test run (sum of qty_per_test × unit_price for all mapped items)."""
+        total = 0.0
+        for m in self.reagent_mappings:
+            if m.item and m.item.unit_price:
+                total += float(m.qty_per_test) * float(m.item.unit_price)
+        return total
+
+    @property
+    def margin(self):
+        """Revenue minus reagent cost (₦)."""
+        if self.price is None:
+            return None
+        return round(float(self.price) - self.reagent_cost, 2)
+
+    @property
+    def margin_pct(self):
+        """Margin as % of price."""
+        if not self.price or float(self.price) == 0:
+            return None
+        m = self.margin
+        if m is None:
+            return None
+        return round((m / float(self.price)) * 100, 1)
 
 
 class TestReagentMap(db.Model):
