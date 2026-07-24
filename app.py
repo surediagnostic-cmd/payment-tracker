@@ -141,52 +141,6 @@ def create_app():
         except Exception as e:
             return f"<pre>debug error: {e}</pre>", 500
 
-    @app.route("/debug-render")
-    def debug_render():
-        """TEMPORARY: reproduce authenticated pages without login to capture tracebacks."""
-        import traceback
-        from flask import render_template, request
-        which = request.args.get("p", "tests")
-        steps = []
-        fake_mds = type("U", (), {"is_mds": True, "is_authenticated": True,
-                                  "can_view_inventory": True, "role": "mds",
-                                  "name": "debug", "id": 0})()
-        import resource
-        def mem():
-            return f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // (1024*1024)}MB"
-        try:
-            from models import TestCatalogue
-            if which == "tests":
-                n = request.args.get("n", "all")
-                tests = TestCatalogue.query.order_by(TestCatalogue.name).all()
-                steps.append(f"loaded {len(tests)} tests (rss {mem()})")
-                if n != "all":
-                    tests = tests[:int(n)]
-                    steps.append(f"limited to {len(tests)}")
-                for t in tests:
-                    _ = (t.reagent_cost, t.margin, t.margin_pct, t.branch_price_count,
-                         len(t.reagent_mappings), t.case_type_label, t.is_active)
-                steps.append(f"data attrs OK (rss {mem()})")
-                from models import CASE_TYPE_LABELS
-                html = render_template("inventory/tests.html", tests=tests,
-                    type_filter="", q="", CASE_TYPES=list(CASE_TYPE_LABELS.items()),
-                    current_user=fake_mds)
-                steps.append(f"template OK ({len(html)} bytes, rss {mem()})")
-            elif which == "detail":
-                t = TestCatalogue.query.order_by(TestCatalogue.name).first()
-                steps.append(f"test id={t.id if t else None}")
-                from models import Branch, InventoryItem
-                html = render_template("inventory/test_detail.html", test=t,
-                    all_items=InventoryItem.query.all(),
-                    branches=Branch.query.all(), bp_map={},
-                    price_audit=[], branch_map={},
-                    CASE_TYPES=[("lab", "Lab")], current_user=fake_mds)
-                steps.append(f"detail template OK ({len(html)} bytes)")
-            return f"<pre>OK: {' | '.join(steps)}</pre>", 200
-        except Exception:
-            return ("<pre>STEPS: " + " | ".join(steps) + "\n\n" +
-                    traceback.format_exc() + "</pre>"), 200
-
     return app
 
 
