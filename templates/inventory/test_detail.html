@@ -82,6 +82,39 @@
   </div>
 </div>
 
+{# LIS Aliases Card #}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:4px;">
+    LIS Name Aliases
+    <span style="color:var(--muted); font-size:12px; font-weight:400; margin-left:8px;">{{ test.aliases|length }} extra name(s)</span>
+  </div>
+  <div style="color:var(--muted); font-size:12px; margin-bottom:16px;">
+    Every LabSmart name that should resolve to this test. The primary LIS name is
+    <b style="color:var(--white);">{{ test.labsmart_name }}</b>; add the HMO/branch billing variants (e.g. “MP IKEJA”, “MP NEM”) so uploads auto-match them all.
+  </div>
+
+  {% if test.aliases %}
+  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+    {% for a in test.aliases|sort(attribute='alias') %}
+    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:4px 6px 4px 12px; font-size:12px; color:var(--white);">
+      {{ a.alias }}
+      <form method="post" action="{{ url_for('inventory.delete_test_alias', test_id=test.id, alias_id=a.id) }}" style="margin:0;">
+        <button type="submit" title="Remove alias" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:14px; line-height:1; padding:0 2px;"
+          onclick="return confirm('Remove alias “{{ a.alias }}”?')">×</button>
+      </form>
+    </span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div style="color:var(--dim); font-size:12px; margin-bottom:16px;">No aliases yet.</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('inventory.add_test_alias', test_id=test.id) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0;">
+    <input name="alias" class="inp" placeholder="Add a LabSmart name variant…" style="flex:1; min-width:220px; font-size:12px; padding:7px 12px;" required>
+    <button type="submit" class="btn-primary" style="font-size:12px; padding:7px 14px;">Add Alias</button>
+  </form>
+</div>
+
 {# Branch Pricing Card #}
 {% if branches %}
 <div class="card" style="padding:22px; margin-bottom:20px;">
