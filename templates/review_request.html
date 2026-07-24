@@ -51,6 +51,20 @@
                 {% if item.children %}
                 <div style="font-size:10px; color:var(--dim); margin-top:4px;">{{ item.children | length }} sub-item{{ 's' if item.children | length > 1 else '' }}</div>
                 {% endif %}
+                {% if item.inventory_item %}
+                <div style="display:inline-flex; align-items:center; gap:5px; margin-top:5px; padding:3px 8px; background:rgba(245,130,31,0.1); border:1px solid rgba(245,130,31,0.25); border-radius:5px; font-size:10.5px; color:var(--orange2);">
+                  <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                  <span style="font-weight:600;">{{ item.inventory_item.name }}</span>
+                  {% if item.qty_ordered %}
+                  <span style="color:var(--muted);">·</span>
+                  <span>{{ item.qty_ordered | int }} {{ item.inventory_item.purchase_unit or item.inventory_item.unit }}</span>
+                  {% if item.inventory_item.pack_size %}
+                  <span style="color:var(--muted);">→</span>
+                  <span>{{ (item.qty_ordered | float * item.inventory_item.pack_size) | int }} {{ item.inventory_item.unit }}s</span>
+                  {% endif %}
+                  {% endif %}
+                </div>
+                {% endif %}
               </td>
               <td><span class="badge badge-blue" style="font-size:11px;">{{ item.category.name }}</span></td>
               <td>
@@ -72,6 +86,20 @@
                 {% if child.notes %}
                 <div style="font-size:11px; color:var(--muted); margin-top:3px; font-style:italic;">
                   <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:middle; margin-right:3px;"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>{{ child.notes }}
+                </div>
+                {% endif %}
+                {% if child.inventory_item %}
+                <div style="display:inline-flex; align-items:center; gap:5px; margin-top:5px; padding:3px 8px; background:rgba(245,130,31,0.1); border:1px solid rgba(245,130,31,0.25); border-radius:5px; font-size:10.5px; color:var(--orange2);">
+                  <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                  <span style="font-weight:600;">{{ child.inventory_item.name }}</span>
+                  {% if child.qty_ordered %}
+                  <span style="color:var(--muted);">·</span>
+                  <span>{{ child.qty_ordered | int }} {{ child.inventory_item.purchase_unit or child.inventory_item.unit }}</span>
+                  {% if child.inventory_item.pack_size %}
+                  <span style="color:var(--muted);">→</span>
+                  <span>{{ (child.qty_ordered | float * child.inventory_item.pack_size) | int }} {{ child.inventory_item.unit }}s</span>
+                  {% endif %}
+                  {% endif %}
                 </div>
                 {% endif %}
               </td>
