@@ -195,20 +195,23 @@ def dashboard():
     # Low-margin tests with recent volume (last 90 days)
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-    vol_test_ids = {
-        row[0] for row in
-        db.session.query(TestVolumeLog.test_id)
-        .filter(TestVolumeLog.created_at >= cutoff).distinct().all()
-    }
     low_margin_tests = []
-    if vol_test_ids:
-        for t in TestCatalogue.query.filter(
-            TestCatalogue.id.in_(vol_test_ids), TestCatalogue.is_active == True
-        ).all():
-            mpct = t.margin_pct
-            if mpct is not None and mpct < 30:
-                low_margin_tests.append((t, mpct))
-        low_margin_tests.sort(key=lambda x: x[1])
+    try:
+        vol_test_ids = {
+            row[0] for row in
+            db.session.query(TestVolumeLog.test_id)
+            .filter(TestVolumeLog.created_at >= cutoff).distinct().all()
+        }
+        if vol_test_ids:
+            for t in TestCatalogue.query.filter(
+                TestCatalogue.id.in_(vol_test_ids), TestCatalogue.is_active == True
+            ).all():
+                mpct = t.margin_pct
+                if mpct is not None and mpct < 30:
+                    low_margin_tests.append((t, mpct))
+            low_margin_tests.sort(key=lambda x: x[1])
+    except Exception:
+        db.session.rollback()
 
     return render_template("inventory/dashboard.html",
         total_items=total_items,
@@ -285,9 +288,13 @@ def item_detail(item_id):
             .limit(30).all())
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
-    cost_audit = (PriceAuditLog.query
-                  .filter_by(entity_type="item_cost", entity_id=item_id)
-                  .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
+    try:
+        cost_audit = (PriceAuditLog.query
+                      .filter_by(entity_type="item_cost", entity_id=item_id)
+                      .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
+    except Exception:
+        db.session.rollback()
+        cost_audit = []
     return render_template("inventory/item_detail.html",
         item=item, stock_levels=stock_levels, txns=txns,
         branches=branches, all_tests=all_tests,
@@ -388,10 +395,14 @@ def test_detail(test_id):
     branches  = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     # build a lookup {branch_id: TestBranchPrice} for the template
     bp_map      = {bp.branch_id: bp for bp in test.branch_prices}
-    price_audit = (PriceAuditLog.query
-                   .filter(PriceAuditLog.entity_type.in_(["test_default", "test_branch"]),
-                           PriceAuditLog.entity_id == test_id)
-                   .order_by(PriceAuditLog.changed_at.desc()).limit(30).all())
+    try:
+        price_audit = (PriceAuditLog.query
+                       .filter(PriceAuditLog.entity_type.in_(["test_default", "test_branch"]),
+                               PriceAuditLog.entity_id == test_id)
+                       .order_by(PriceAuditLog.changed_at.desc()).limit(30).all())
+    except Exception:
+        db.session.rollback()
+        price_audit = []
     # Branch name lookup for audit log display
     branch_map  = {b.id: b.name for b in branches}
     return render_template("inventory/test_detail.html",
@@ -673,9 +684,13 @@ def package_detail(pkg_id):
     pkg         = PackageCatalogue.query.get_or_404(pkg_id)
     all_tests   = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
     linked_ids  = {pt.test_id for pt in pkg.tests}
-    price_audit = (PriceAuditLog.query
-                   .filter_by(entity_type="package", entity_id=pkg_id)
-                   .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
+    try:
+        price_audit = (PriceAuditLog.query
+                       .filter_by(entity_type="package", entity_id=pkg_id)
+                       .order_by(PriceAuditLog.changed_at.desc()).limit(20).all())
+    except Exception:
+        db.session.rollback()
+        price_audit = []
     return render_template("inventory/package_detail.html",
         package=pkg, all_tests=all_tests, linked_ids=linked_ids,
         price_audit=price_audit,
