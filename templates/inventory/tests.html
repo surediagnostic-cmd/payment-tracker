@@ -55,6 +55,7 @@
       <th style="text-align:right;">Margin</th>
       <th style="text-align:center;">Branch Pricing</th>
       <th>Reagents</th><th>Status</th>
+      {% if current_user.is_mds %}<th style="text-align:right;"></th>{% endif %}
     </tr></thead>
     <tbody>
       {% for test in tests %}
@@ -97,9 +98,17 @@
           {% else %}<span class="badge badge-gray">None</span>{% endif %}
         </td>
         <td>{% if test.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-gray">Inactive</span>{% endif %}</td>
+        {% if current_user.is_mds %}
+        <td style="text-align:right;">
+          <form method="post" action="{{ url_for('inventory.delete_test', test_id=test.id) }}" style="margin:0;"
+                onsubmit="return confirm('Permanently delete “{{ test.name }}”? Blocked if it has usage history or is in a package.');">
+            <button type="submit" title="Delete test" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:12px; padding:4px 8px;">Delete</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
       {% else %}
-      <tr id="no-results-row"><td colspan="9" style="text-align:center; color:var(--muted); padding:40px;">No tests found</td></tr>
+      <tr id="no-results-row"><td colspan="{{ 10 if current_user.is_mds else 9 }}" style="text-align:center; color:var(--muted); padding:40px;">No tests found</td></tr>
       {% endfor %}
     </tbody>
   </table>
