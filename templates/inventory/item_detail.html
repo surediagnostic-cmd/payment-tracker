@@ -125,6 +125,27 @@
   {% endif %}
 </div>
 
+{# Cost Change History #}
+{% if cost_audit %}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Unit Cost Change History</div>
+  <table>
+    <thead><tr><th>Date</th><th>Old Cost</th><th>New Cost</th><th>Changed By</th><th>Notes</th></tr></thead>
+    <tbody>
+      {% for a in cost_audit %}
+      <tr>
+        <td style="font-size:12px; color:var(--muted);">{{ a.changed_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td style="color:var(--muted);">{% if a.old_price is not none %}₦{{ '{:,.2f}'.format(a.old_price) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}</td>
+        <td style="color:var(--white); font-weight:600;">{% if a.new_price is not none %}₦{{ '{:,.2f}'.format(a.new_price) }}{% else %}<span style="color:var(--dim);">—</span>{% endif %}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.changer.name if a.changer else '—' }}</td>
+        <td style="color:var(--dim); font-size:12px;">{{ a.notes or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {# Edit Modal #}
 <div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
   <div class="card" style="width:520px; max-width:95vw; padding:28px; max-height:90vh; overflow-y:auto;">
