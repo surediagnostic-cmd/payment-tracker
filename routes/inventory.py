@@ -448,9 +448,43 @@ def edit_test(test_id):
         _log_price("test_default", test_id, old_price,
                    float(new_price) if new_price is not None else None)
     test.price = new_price
+    test.is_active = request.form.get("is_active") == "1"
     db.session.commit()
     flash(f"Test '{test.name}' updated.", "success")
     return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/<int:test_id>/delete", methods=["POST"])
+@login_required
+@_mds_only
+def delete_test(test_id):
+    """Permanently delete a test (admin/MDS only).
+
+    Blocks deletion when the test carries history worth preserving — usage
+    (volume logs) or package membership — and points the admin at deactivation
+    instead. Junk / mistaken entries have neither, so they delete cleanly.
+    Reagent mappings, branch prices and aliases cascade away automatically.
+    """
+    test = TestCatalogue.query.get_or_404(test_id)
+    name = test.name
+
+    vol_count = TestVolumeLog.query.filter_by(test_id=test_id).count()
+    pkg_count = len(test.package_links)
+    if vol_count or pkg_count:
+        parts = []
+        if vol_count: parts.append(f"{vol_count} usage record(s)")
+        if pkg_count: parts.append(f"{pkg_count} package(s)")
+        flash(
+            f"'{name}' can't be deleted — it has {' and '.join(parts)}. "
+            f"Use Edit → set Inactive to retire it instead (keeps history).",
+            "error",
+        )
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    db.session.delete(test)   # cascades reagent maps, branch prices, aliases
+    db.session.commit()
+    flash(f"Test '{name}' deleted.", "success")
+    return redirect(url_for("inventory.tests"))
 
 
 # ── Test LIS aliases (HMO / branch billing variants) ──────────────────────────
