@@ -470,23 +470,29 @@ def download_tests_template():
 @login_required
 @_inventory_access
 def upload_tests_csv():
-    import csv, io
-    from models import TestCatalogue as TC, TestBranchPrice as TBP
     file = request.files.get("csv_file")
     if not file or not file.filename:
         flash("No file selected.", "error")
         return redirect(url_for("inventory.tests"))
 
     VALID_TYPES = {v for v, _ in CASE_TYPES}
-    # Build branch lookup: "ijofi" → Branch object (match Price (BranchName) headers)
-    all_branches = {b.name.lower(): b for b in Branch.query.all()}
 
     try:
-        raw    = file.read().decode("utf-8-sig", errors="replace")
-        reader = csv.DictReader(io.StringIO(raw))
+        # Pre-load all branches and existing tests in 2 queries — avoids per-row DB calls
+        all_branches = {b.name.lower(): b for b in Branch.query.all()}
+        lis_lookup   = {}
+        name_lookup  = {}
+        for t in TestCatalogue.query.all():
+            if t.labsmart_name:
+                lis_lookup[t.labsmart_name.lower()] = t
+            name_lookup[t.name.lower()] = t
+
+        raw     = file.read().decode("utf-8-sig", errors="replace")
+        reader  = csv.DictReader(io.StringIO(raw))
         headers = [h.strip() for h in (reader.fieldnames or [])]
+
         # Identify branch price columns: "Price (BranchName)"
-        branch_cols = {}  # header → Branch
+        branch_cols = {}
         for h in headers:
             if h.lower().startswith("price (") and h.endswith(")"):
                 bname = h[7:-1].strip().lower()
@@ -495,6 +501,9 @@ def upload_tests_csv():
                     branch_cols[h] = b
 
         added = updated = skipped = 0
+        # Collect (tc_obj, {branch_id: price}) to process after tests are flushed
+        pending_bp = []
+
         for row in reader:
             name     = (row.get("Test Name") or "").strip()
             lis_name = (row.get("LIS Name")  or "").strip()
@@ -506,59 +515,81 @@ def upload_tests_csv():
                 case_type = "lab"
             sub_category = (row.get("Sub-Category") or "").strip() or None
             price_raw    = (row.get("Default Price (N)") or row.get("Price (N)") or "").replace(",", "").strip()
-            active_raw = (row.get("Active") or "yes").strip().lower()
-            is_active  = active_raw not in ("no", "false", "0")
+            active_raw   = (row.get("Active") or "yes").strip().lower()
+            is_active    = active_raw not in ("no", "false", "0")
             try:
                 price = Decimal(price_raw) if price_raw else None
             except Exception:
                 price = None
 
-            # Match by LIS name first, then display name
+            # Match by LIS name first, then display name — pure dict lookup, no DB call
             existing = None
             if lis_name:
-                existing = TC.query.filter(TC.labsmart_name.ilike(lis_name)).first()
+                existing = lis_lookup.get(lis_name.lower())
             if not existing and name:
-                existing = TC.query.filter(TC.name.ilike(name)).first()
+                existing = name_lookup.get(name.lower())
 
             if existing:
-                if name:          existing.name          = name
-                if lis_name:      existing.labsmart_name = lis_name
+                if name:     existing.name          = name
+                if lis_name: existing.labsmart_name = lis_name
                 existing.case_type    = case_type
                 existing.sub_category = sub_category
                 existing.price        = price
                 existing.is_active    = is_active
+                if lis_name: lis_lookup[lis_name.lower()] = existing
+                name_lookup[name.lower()] = existing
                 updated += 1
             else:
                 if not name or not lis_name:
                     skipped += 1
                     continue
-                existing = TC(
+                existing = TestCatalogue(
                     name=name, labsmart_name=lis_name,
                     case_type=case_type, sub_category=sub_category,
                     price=price, is_active=is_active,
                 )
                 db.session.add(existing)
-                db.session.flush()
+                lis_lookup[lis_name.lower()]  = existing
+                name_lookup[name.lower()] = existing
                 added += 1
 
-            # Handle branch prices
-            for col_header, branch in branch_cols.items():
-                bp_raw = (row.get(col_header) or "").replace(",", "").strip()
-                if not bp_raw:
-                    continue
-                try:
-                    bp_val = Decimal(bp_raw)
-                except Exception:
-                    continue
-                tbp = TBP.query.filter_by(test_id=existing.id, branch_id=branch.id).first()
-                if tbp:
-                    tbp.price = bp_val
-                    tbp.updated_by = current_user.id
-                else:
-                    db.session.add(TBP(
-                        test_id=existing.id, branch_id=branch.id,
-                        price=bp_val, updated_by=current_user.id,
-                    ))
+            # Collect branch prices (no DB calls yet — need flush for new test IDs)
+            if branch_cols:
+                bp_for_row = {}
+                for col_header, branch in branch_cols.items():
+                    bp_raw = (row.get(col_header) or "").replace(",", "").strip()
+                    if not bp_raw:
+                        continue
+                    try:
+                        bp_for_row[branch.id] = Decimal(bp_raw)
+                    except Exception:
+                        pass
+                if bp_for_row:
+                    pending_bp.append((existing, bp_for_row))
+
+        # ONE flush gives IDs to all newly-added TestCatalogue objects
+        db.session.flush()
+
+        # Batch-load all existing branch prices in a single query
+        if pending_bp:
+            tc_ids = [tc.id for tc, _ in pending_bp]
+            existing_tbps = {
+                (r.test_id, r.branch_id): r
+                for r in TestBranchPrice.query.filter(
+                    TestBranchPrice.test_id.in_(tc_ids)
+                ).all()
+            }
+            for tc, bp_dict in pending_bp:
+                for branch_id, bp_val in bp_dict.items():
+                    key = (tc.id, branch_id)
+                    if key in existing_tbps:
+                        existing_tbps[key].price      = bp_val
+                        existing_tbps[key].updated_by = current_user.id
+                    else:
+                        db.session.add(TestBranchPrice(
+                            test_id=tc.id, branch_id=branch_id,
+                            price=bp_val, updated_by=current_user.id,
+                        ))
 
         db.session.commit()
         flash(f"CSV imported — {added} added, {updated} updated, {skipped} skipped.", "success")
