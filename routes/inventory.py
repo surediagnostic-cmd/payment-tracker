@@ -1,5 +1,6 @@
 """Inventory Management — reagents, consumables, LIS upload & consumption tracking."""
 from datetime import datetime, timezone, date as date_type
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 import csv, io
 from functools import wraps
@@ -316,10 +317,15 @@ def add_test():
     name      = request.form.get("name", "").strip()
     lis_name  = request.form.get("labsmart_name", "").strip()
     case_type = request.form.get("case_type", "lab")
+    price_raw = request.form.get("price", "").strip().replace(",", "")
     if not name or not lis_name:
         flash("Test name and LIS name are required.", "error")
         return redirect(url_for("inventory.tests"))
-    t = TestCatalogue(name=name, labsmart_name=lis_name, case_type=case_type)
+    try:
+        price = Decimal(price_raw) if price_raw else None
+    except Exception:
+        price = None
+    t = TestCatalogue(name=name, labsmart_name=lis_name, case_type=case_type, price=price)
     db.session.add(t)
     db.session.commit()
     flash(f"Test '{name}' added.", "success")
@@ -345,9 +351,104 @@ def edit_test(test_id):
     test.name          = request.form.get("name", test.name).strip()
     test.labsmart_name = request.form.get("labsmart_name", test.labsmart_name).strip()
     test.case_type     = request.form.get("case_type", test.case_type)
+    price_raw = request.form.get("price", "").strip().replace(",", "")
+    try:
+        test.price = Decimal(price_raw) if price_raw else None
+    except Exception:
+        pass
     db.session.commit()
     flash(f"Test '{test.name}' updated.", "success")
     return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/template")
+@login_required
+@_inventory_access
+def download_tests_template():
+    import csv, io
+    from models import TestCatalogue as TC
+    si = io.StringIO()
+    w  = csv.writer(si)
+    w.writerow(["Test Name", "LIS Name", "Case Type", "Price (N)", "Active"])
+    for t in TC.query.order_by(TC.name).all():
+        w.writerow([
+            t.name, t.labsmart_name, t.case_type,
+            float(t.price) if t.price else "",
+            "Yes" if t.is_active else "No",
+        ])
+    output = si.getvalue()
+    from flask import make_response
+    resp = make_response(output)
+    resp.headers["Content-Disposition"] = "attachment; filename=test_catalogue_template.csv"
+    resp.headers["Content-Type"] = "text/csv"
+    return resp
+
+
+@inventory_bp.route("/tests/upload", methods=["POST"])
+@login_required
+@_inventory_access
+def upload_tests_csv():
+    import csv, io
+    from models import TestCatalogue as TC
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("No file selected.", "error")
+        return redirect(url_for("inventory.tests"))
+
+    VALID_TYPES = {v for v, _ in CASE_TYPES}
+    try:
+        raw    = file.read().decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(raw))
+        added = updated = skipped = 0
+        for row in reader:
+            name     = (row.get("Test Name") or "").strip()
+            lis_name = (row.get("LIS Name")  or "").strip()
+            if not name and not lis_name:
+                skipped += 1
+                continue
+            case_type  = (row.get("Case Type") or "lab").strip().lower()
+            if case_type not in VALID_TYPES:
+                case_type = "lab"
+            price_raw  = (row.get("Price (N)") or "").replace(",", "").strip()
+            active_raw = (row.get("Active") or "yes").strip().lower()
+            is_active  = active_raw not in ("no", "false", "0")
+            try:
+                price = Decimal(price_raw) if price_raw else None
+            except Exception:
+                price = None
+
+            # Match by LIS name first, then display name
+            existing = None
+            if lis_name:
+                existing = TC.query.filter(
+                    TC.labsmart_name.ilike(lis_name)
+                ).first()
+            if not existing and name:
+                existing = TC.query.filter(TC.name.ilike(name)).first()
+
+            if existing:
+                if name:          existing.name          = name
+                if lis_name:      existing.labsmart_name = lis_name
+                existing.case_type = case_type
+                existing.price     = price
+                existing.is_active = is_active
+                updated += 1
+            else:
+                if not name or not lis_name:
+                    skipped += 1
+                    continue
+                db.session.add(TC(
+                    name=name, labsmart_name=lis_name,
+                    case_type=case_type, price=price, is_active=is_active,
+                ))
+                added += 1
+
+        db.session.commit()
+        flash(f"CSV imported — {added} added, {updated} updated, {skipped} skipped.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Import failed: {e}", "error")
+    return redirect(url_for("inventory.tests"))
 
 
 @inventory_bp.route("/tests/<int:test_id>/mappings/add", methods=["POST"])
