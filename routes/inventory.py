@@ -9,6 +9,7 @@ from flask import (Blueprint, render_template, redirect, url_for, flash,
                    request, abort, jsonify, Response)
 from flask_login import login_required, current_user
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from app import db
 from models import (
@@ -367,7 +368,13 @@ def toggle_item(item_id):
 def tests():
     type_filter = request.args.get("type", "")
     q           = request.args.get("q", "").strip()
-    query = TestCatalogue.query
+    # Eager-load the relationships the template touches per row (reagent cost,
+    # margins, branch pricing) so the list is a handful of queries instead of an
+    # N+1 explosion that overwhelms the worker on large catalogues.
+    query = TestCatalogue.query.options(
+        selectinload(TestCatalogue.reagent_mappings).selectinload(TestReagentMap.item),
+        selectinload(TestCatalogue.branch_prices),
+    )
     if type_filter:
         query = query.filter_by(case_type=type_filter)
     if q:
