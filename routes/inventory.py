@@ -14,7 +14,7 @@ from app import db
 from models import (
     Branch, User,
     InventoryItem, TestCatalogue, TestReagentMap, TestBranchPrice,
-    TestVolumeLog, PriceAuditLog,
+    TestAlias, TestVolumeLog, PriceAuditLog,
     PackageCatalogue, PackageTest,
     StockLevel, StockTransaction,
     LisUpload, LisUploadRow, UnmatchedInvestigation,
@@ -140,6 +140,24 @@ def _best_package_match(name, all_pkgs):
         if s > score:
             score, best = s, p
     return best, score
+
+
+def _build_test_lookup(all_tests):
+    """Exact-match lookup keyed by lowercased labsmart_name AND every alias.
+
+    Aliases are loaded first, then canonical labsmart_names, so that a canonical
+    name always wins if it happens to collide with an alias string. One bulk query
+    for aliases — no per-test round-trips.
+    """
+    lookup = {}
+    tests_by_id = {t.id: t for t in all_tests}
+    for a in TestAlias.query.all():
+        t = tests_by_id.get(a.test_id)
+        if t and a.alias:
+            lookup[a.alias.strip().lower()] = t
+    for t in all_tests:
+        lookup[t.labsmart_name.strip().lower()] = t
+    return lookup
 
 
 def _match_branch(raw, branches):
@@ -433,6 +451,149 @@ def edit_test(test_id):
     db.session.commit()
     flash(f"Test '{test.name}' updated.", "success")
     return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+# ── Test LIS aliases (HMO / branch billing variants) ──────────────────────────
+
+@inventory_bp.route("/tests/<int:test_id>/aliases/add", methods=["POST"])
+@login_required
+@_inventory_access
+def add_test_alias(test_id):
+    test  = TestCatalogue.query.get_or_404(test_id)
+    alias = (request.form.get("alias") or "").strip()
+    if not alias:
+        flash("Alias cannot be empty.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    key = alias.lower()
+    # Is this name already taken (by any test's LIS name or an existing alias)?
+    if key == test.labsmart_name.strip().lower() or any(a.alias.strip().lower() == key for a in test.aliases):
+        flash(f"'{alias}' is already mapped to this test.", "warning")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+    clash = TestAlias.query.filter(func.lower(TestAlias.alias) == key).first()
+    if clash:
+        flash(f"'{alias}' is already an alias of '{clash.test.name}'.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+    other = TestCatalogue.query.filter(func.lower(TestCatalogue.labsmart_name) == key).first()
+    if other:
+        flash(f"'{alias}' is already the LIS name of '{other.name}'.", "error")
+        return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+    db.session.add(TestAlias(test_id=test_id, alias=alias))
+    db.session.commit()
+    flash(f"Alias '{alias}' added.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/<int:test_id>/aliases/<int:alias_id>/delete", methods=["POST"])
+@login_required
+@_inventory_access
+def delete_test_alias(test_id, alias_id):
+    alias = TestAlias.query.filter_by(id=alias_id, test_id=test_id).first_or_404()
+    db.session.delete(alias)
+    db.session.commit()
+    flash("Alias removed.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/aliases/template")
+@login_required
+@_inventory_access
+def download_aliases_template():
+    """Blank template for bulk alias import: one row per test, pipe-separated aliases."""
+    si = io.StringIO()
+    w  = csv.writer(si)
+    w.writerow(["Test", "Aliases (separate with |)"])
+    w.writerow(["MALARIA PARASITE(MP)", "MP | MP IKEJA | MP NEM | THT MP | MP LEADWAY"])
+    w.writerow(["BLOOD GROUP", "BLOOD GROUP (NEW) | BLOOD GROUP SURE IJOFI | BLOO GROUP REDEEMED"])
+    resp = Response(si.getvalue(), mimetype="text/csv")
+    resp.headers["Content-Disposition"] = "attachment; filename=test_aliases_template.csv"
+    return resp
+
+
+@inventory_bp.route("/tests/aliases/import", methods=["POST"])
+@login_required
+@_inventory_access
+def import_aliases():
+    """Bulk-attach LabSmart name variants to existing tests.
+
+    CSV columns:
+      Test    — matched to an existing test by exact LIS name, then exact display
+                name, then fuzzy (>= AUTO_MATCH_THRESHOLD).
+      Aliases — one or more LabSmart names separated by '|' (pipe), because many
+                lab names legitimately contain commas.
+    """
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("No file selected.", "error")
+        return redirect(url_for("inventory.tests"))
+
+    try:
+        raw    = file.read().decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(raw))
+        headers = [h.strip() for h in (reader.fieldnames or [])]
+        # tolerate any header that starts with "alias"
+        alias_col = next((h for h in headers if h.strip().lower().startswith("alias")), None)
+        test_col  = next((h for h in headers if h.strip().lower() in ("test", "test name", "lis name", "canonical")), None)
+        if not test_col or not alias_col:
+            flash("CSV must have a 'Test' column and an 'Aliases' column.", "error")
+            return redirect(url_for("inventory.tests"))
+
+        all_tests = TestCatalogue.query.all()
+        by_lis  = {t.labsmart_name.strip().lower(): t for t in all_tests}
+        by_name = {t.name.strip().lower(): t for t in all_tests}
+        # Every name already claimed anywhere (LIS names + existing aliases)
+        claimed = {t.labsmart_name.strip().lower(): t for t in all_tests}
+        for a in TestAlias.query.all():
+            if a.alias:
+                claimed[a.alias.strip().lower()] = a.test
+
+        added = skipped = conflicts = 0
+        unmatched_rows = []
+
+        for row in reader:
+            test_key = (row.get(test_col) or "").strip()
+            aliases_raw = (row.get(alias_col) or "").strip()
+            if not test_key or not aliases_raw:
+                continue
+
+            k = test_key.lower()
+            test = by_lis.get(k) or by_name.get(k)
+            if not test:
+                best, score = _best_test_match(test_key, all_tests)
+                test = best if score >= AUTO_MATCH_THRESHOLD else None
+            if not test:
+                unmatched_rows.append(test_key)
+                continue
+
+            for alias in aliases_raw.split("|"):
+                alias = alias.strip()
+                if not alias:
+                    continue
+                ak = alias.lower()
+                owner = claimed.get(ak)
+                if owner is not None:
+                    if owner.id != test.id:
+                        conflicts += 1   # name already maps to a different test — leave it
+                    else:
+                        skipped += 1     # already mapped to this test
+                    continue
+                db.session.add(TestAlias(test_id=test.id, alias=alias))
+                claimed[ak] = test
+                added += 1
+
+        db.session.commit()
+        msg = f"Alias import complete — {added} added, {skipped} already present, {conflicts} conflict(s)."
+        if unmatched_rows:
+            preview = ", ".join(unmatched_rows[:8]) + ("…" if len(unmatched_rows) > 8 else "")
+            msg += f" {len(unmatched_rows)} row(s) had no matching test: {preview}"
+            flash(msg, "warning")
+        else:
+            flash(msg, "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Alias import failed: {e}", "error")
+    return redirect(url_for("inventory.tests"))
 
 
 @inventory_bp.route("/tests/template")
@@ -935,8 +1096,8 @@ def upload_lis():
                     inv_counts[inv] = inv_counts.get(inv, 0) + 1
 
     # ── Fuzzy-match each unique investigation name ────────────────────────────
-    # Build quick-lookup dicts
-    test_exact  = {t.labsmart_name.strip().lower(): t for t in all_tests}
+    # Build quick-lookup dicts (labsmart_name + aliases for tests)
+    test_exact  = _build_test_lookup(all_tests)
     pkg_exact   = {p.labsmart_name.strip().lower(): p for p in all_pkgs}
 
     matched_names   = set()
@@ -1014,6 +1175,12 @@ def resolve_unmatched(upload_id):
         flash("This upload has already been applied.", "error")
         return redirect(url_for("inventory.upload_review", upload_id=upload_id))
 
+    # Pre-load every name already claimed (labsmart_name + existing aliases) so a
+    # manual resolution can be remembered as an alias without violating uniqueness.
+    claimed = {n.strip().lower() for (n,) in db.session.query(TestCatalogue.labsmart_name).all() if n}
+    claimed |= {a.strip().lower() for (a,) in db.session.query(TestAlias.alias).all() if a}
+
+    learned = 0
     for ui in upload.unmatched:
         action   = request.form.get(f"action_{ui.id}", "pending")
         test_id  = request.form.get(f"test_id_{ui.id}", type=int)
@@ -1022,13 +1189,22 @@ def resolve_unmatched(upload_id):
             ui.resolved_test_id = test_id
             ui.resolved_by      = current_user.id
             ui.resolved_at      = datetime.now(timezone.utc)
+            # Remember this name so future uploads auto-match it
+            key = (ui.raw_name or "").strip().lower()
+            if key and key not in claimed:
+                db.session.add(TestAlias(test_id=test_id, alias=ui.raw_name.strip()))
+                claimed.add(key)
+                learned += 1
         elif action == "skipped":
             ui.action = "skipped"
             ui.resolved_by = current_user.id
             ui.resolved_at = datetime.now(timezone.utc)
 
     db.session.commit()
-    flash("Resolutions saved.", "success")
+    if learned:
+        flash(f"Resolutions saved — {learned} name(s) remembered as aliases for next time.", "success")
+    else:
+        flash("Resolutions saved.", "success")
     return redirect(url_for("inventory.upload_review", upload_id=upload_id))
 
 
@@ -1049,7 +1225,7 @@ def apply_upload(upload_id):
     all_tests  = TestCatalogue.query.filter_by(is_active=True).all()
     all_pkgs   = PackageCatalogue.query.filter_by(is_active=True).all()
 
-    test_exact = {t.labsmart_name.strip().lower(): t for t in all_tests}
+    test_exact = _build_test_lookup(all_tests)
     pkg_exact  = {p.labsmart_name.strip().lower(): p for p in all_pkgs}
 
     # Resolution map from user-reviewed unmatched items
