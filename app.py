@@ -390,6 +390,63 @@ def _run_migrations():
             db.session.rollback()
             print(f"[migration] test_branch_prices: {e}")
 
+    # 11. price_audit_log table
+    if 'price_audit_log' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE price_audit_log (
+                    id          SERIAL PRIMARY KEY,
+                    entity_type VARCHAR(20)  NOT NULL,
+                    entity_id   INTEGER      NOT NULL,
+                    branch_id   INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+                    old_price   NUMERIC(14,2),
+                    new_price   NUMERIC(14,2),
+                    changed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    changed_at  TIMESTAMP DEFAULT NOW(),
+                    notes       VARCHAR(300)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created price_audit_log table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] price_audit_log: {e}")
+
+    # 12. test_volume_logs table
+    if 'test_volume_logs' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE test_volume_logs (
+                    id           SERIAL PRIMARY KEY,
+                    test_id      INTEGER NOT NULL REFERENCES test_catalogue(id) ON DELETE CASCADE,
+                    branch_id    INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+                    upload_id    INTEGER REFERENCES lis_uploads(id) ON DELETE SET NULL,
+                    volume       INTEGER NOT NULL DEFAULT 0,
+                    period_start DATE,
+                    period_end   DATE,
+                    created_at   TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            db.session.commit()
+            print("[migration] created test_volume_logs table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] test_volume_logs: {e}")
+
+    # 13. price column on package_catalogue
+    if 'package_catalogue' in tables:
+        pc_cols = {col['name'] for col in insp.get_columns('package_catalogue')}
+        if 'price' not in pc_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE package_catalogue ADD COLUMN price NUMERIC(12,2)"
+                ))
+                db.session.commit()
+                print("[migration] added price to package_catalogue")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] package_catalogue price: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
