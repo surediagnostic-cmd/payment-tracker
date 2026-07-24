@@ -176,10 +176,11 @@ ITEM_CATEGORY_LABELS = {
 }
 
 CASE_TYPE_LABELS = {
-    'lab':  'Lab',
-    'usg':  'USG',
-    'xray': 'X-Ray',
-    'ecg':  'ECG',
+    'lab':      'Lab',
+    'usg':      'USG',
+    'xray':     'X-Ray',
+    'ecg':      'ECG',
+    'wellness': 'Wellness',
 }
 
 
