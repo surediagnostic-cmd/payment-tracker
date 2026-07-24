@@ -461,6 +461,21 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] test_catalogue sub_category: {e}")
 
+    # 15. branch_id column on test_aliases (branch attribution for billing variants)
+    if 'test_aliases' in tables:
+        ta_cols = {col['name'] for col in insp.get_columns('test_aliases')}
+        if 'branch_id' not in ta_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE test_aliases ADD COLUMN branch_id INTEGER "
+                    "REFERENCES branches(id) ON DELETE SET NULL"
+                ))
+                db.session.commit()
+                print("[migration] added branch_id to test_aliases")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] test_aliases branch_id: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
