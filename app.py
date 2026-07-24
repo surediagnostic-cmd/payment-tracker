@@ -447,6 +447,20 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] package_catalogue price: {e}")
 
+    # 14. sub_category column on test_catalogue
+    if 'test_catalogue' in tables:
+        tc_cols = {col['name'] for col in insp.get_columns('test_catalogue')}
+        if 'sub_category' not in tc_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE test_catalogue ADD COLUMN sub_category VARCHAR(200)"
+                ))
+                db.session.commit()
+                print("[migration] added sub_category to test_catalogue")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] test_catalogue sub_category: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
