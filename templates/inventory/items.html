@@ -134,15 +134,20 @@
         </div>
         <div>
           <label class="label">Pack Size (units/pack)</label>
-          <input name="pack_size" class="inp" type="number" min="1" placeholder="e.g. 50">
+          <input name="pack_size" class="inp" type="number" min="1" placeholder="e.g. 50" oninput="calcUnit(this.form)">
         </div>
         <div>
           <label class="label">Purchase Unit Label</label>
           <input name="purchase_unit" class="inp" placeholder="Pack / Box / Kit / Bottle">
         </div>
         <div>
-          <label class="label">Unit Price (₦)</label>
-          <input name="unit_price" class="inp" type="number" step="0.01" placeholder="e.g. 80.00">
+          <label class="label">Pack Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— what you pay per pack</span></label>
+          <input name="pack_price" class="inp" type="number" step="0.01" placeholder="e.g. 82000" oninput="calcUnit(this.form)">
+        </div>
+        <div>
+          <label class="label">Unit Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— per unit; auto = pack ÷ pack size</span></label>
+          <input name="unit_price" class="inp" type="number" step="0.01" placeholder="e.g. 3280.00">
+          <div id="unitHint" style="font-size:11px; color:var(--muted); margin-top:4px;"></div>
         </div>
         <div>
           <label class="label">Reorder Level</label>
@@ -177,5 +182,19 @@ function liveFilter() {
   if (empty) empty.style.display = (visible === 0 && rows.length > 0) ? '' : 'none';
 }
 document.addEventListener('DOMContentLoaded', liveFilter);
+
+// Auto-derive unit price = pack price / pack size
+function calcUnit(form) {
+  var pp = parseFloat(form.pack_price && form.pack_price.value);
+  var ps = parseInt(form.pack_size && form.pack_size.value, 10);
+  var hint = form.querySelector('#unitHint');
+  if (pp > 0 && ps > 0) {
+    var u = Math.round((pp / ps) * 100) / 100;
+    if (form.unit_price) form.unit_price.value = u;
+    if (hint) hint.textContent = '= ₦' + pp.toLocaleString() + ' ÷ ' + ps + ' = ₦' + u.toLocaleString() + ' per unit';
+  } else if (hint) {
+    hint.textContent = '';
+  }
+}
 </script>
 {% endblock %}
