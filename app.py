@@ -476,6 +476,20 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] test_aliases branch_id: {e}")
 
+    # 16. is_outsourced column on test_aliases
+    if 'test_aliases' in tables:
+        ta_cols = {col['name'] for col in insp.get_columns('test_aliases')}
+        if 'is_outsourced' not in ta_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE test_aliases ADD COLUMN is_outsourced BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                db.session.commit()
+                print("[migration] added is_outsourced to test_aliases")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] test_aliases is_outsourced: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
