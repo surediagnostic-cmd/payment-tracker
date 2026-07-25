@@ -490,6 +490,20 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] test_aliases is_outsourced: {e}")
 
+    # 17. pack_price column on inventory_items (unit_price derived from it ÷ pack_size)
+    if 'inventory_items' in tables:
+        ii_cols = {col['name'] for col in insp.get_columns('inventory_items')}
+        if 'pack_price' not in ii_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE inventory_items ADD COLUMN pack_price NUMERIC(14,2)"
+                ))
+                db.session.commit()
+                print("[migration] added pack_price to inventory_items")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] inventory_items pack_price: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
