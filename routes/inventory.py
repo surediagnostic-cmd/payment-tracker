@@ -266,6 +266,23 @@ def items():
     )
 
 
+def _resolve_pricing(form, pack_size):
+    """Return (pack_price, unit_price). If a pack price is entered together with a
+    pack size, the per-unit price is derived as pack_price / pack_size; otherwise
+    the entered unit price is used as-is."""
+    def _num(v):
+        v = (v or "").strip().replace(",", "")
+        try:
+            return float(v) if v else None
+        except ValueError:
+            return None
+    pack_price = _num(form.get("pack_price"))
+    unit_price = _num(form.get("unit_price"))
+    if pack_price is not None and pack_size:
+        unit_price = round(pack_price / pack_size, 2)
+    return pack_price, unit_price
+
+
 @inventory_bp.route("/items/add", methods=["POST"])
 @login_required
 @_inventory_access
@@ -276,7 +293,6 @@ def add_item():
     unit   = request.form.get("unit", "unit").strip() or "unit"
     pack          = request.form.get("pack_size", "").strip()
     purchase_unit = request.form.get("purchase_unit", "").strip() or None
-    price  = request.form.get("unit_price", "").strip()
     reorder= request.form.get("reorder_level", "").strip()
     notes  = request.form.get("notes", "").strip() or None
 
@@ -284,11 +300,14 @@ def add_item():
         flash("Item name is required.", "error")
         return redirect(url_for("inventory.items"))
 
+    pack_size = int(pack) if pack else None
+    pack_price, unit_price = _resolve_pricing(request.form, pack_size)
     item = InventoryItem(
         name=name, item_code=code, category=cat, unit=unit,
-        pack_size=int(pack) if pack else None,
+        pack_size=pack_size,
         purchase_unit=purchase_unit,
-        unit_price=float(price) if price else None,
+        pack_price=pack_price,
+        unit_price=unit_price,
         reorder_level=float(reorder) if reorder else None,
         notes=notes,
     )
@@ -336,14 +355,15 @@ def edit_item(item_id):
     item.unit     = request.form.get("unit", item.unit).strip() or item.unit
     pack          = request.form.get("pack_size", "").strip()
     purchase_unit = request.form.get("purchase_unit", "").strip() or None
-    price_raw     = request.form.get("unit_price", "").strip()
     reorder       = request.form.get("reorder_level", "").strip()
-    new_price     = float(price_raw) if price_raw else None
+    pack_size     = int(pack) if pack else None
+    new_pack_price, new_price = _resolve_pricing(request.form, pack_size)
     old_price     = float(item.unit_price) if item.unit_price is not None else None
     if old_price != new_price:
         _log_price("item_cost", item_id, old_price, new_price)
-    item.pack_size     = int(pack) if pack else None
+    item.pack_size     = pack_size
     item.purchase_unit = purchase_unit
+    item.pack_price    = new_pack_price
     item.unit_price    = new_price
     item.reorder_level = float(reorder) if reorder else None
     item.notes         = request.form.get("notes", "").strip() or None
