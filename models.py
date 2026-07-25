@@ -338,6 +338,10 @@ class TestAlias(db.Model):
     # → that branch; unlabelled / HMO / status names → the main branch (Ilasa).
     # NULL means "no specific branch" → fall back to the upload's collection centre.
     branch_id  = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
+    # Outsourced (e.g. "PSA OS") — sent to an external lab. No reagent is consumed,
+    # and any branch can outsource, so attribution follows the collection centre
+    # (branch_id is ignored for these).
+    is_outsourced = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     test   = db.relationship('TestCatalogue', back_populates='aliases')
