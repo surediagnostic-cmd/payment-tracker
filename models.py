@@ -193,7 +193,8 @@ class InventoryItem(db.Model):
     unit        = db.Column(db.String(50),  nullable=False, default='unit')
     pack_size      = db.Column(db.Integer,     nullable=True)
     purchase_unit  = db.Column(db.String(40),  nullable=True)
-    unit_price  = db.Column(db.Numeric(14, 2), nullable=True)
+    pack_price  = db.Column(db.Numeric(14, 2), nullable=True)   # cost of a full pack; unit_price derived from it ÷ pack_size
+    unit_price  = db.Column(db.Numeric(14, 2), nullable=True)   # cost per single unit — used for reagent cost / margin
     reorder_level = db.Column(db.Numeric(14, 4), nullable=True)
     is_active   = db.Column(db.Boolean, default=True)
     notes       = db.Column(db.Text, nullable=True)
