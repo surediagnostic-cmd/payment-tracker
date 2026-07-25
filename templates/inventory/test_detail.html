@@ -98,28 +98,60 @@
   </div>
   <div style="color:var(--muted); font-size:12px; margin-bottom:16px;">
     Every LabSmart name that should resolve to this test. The primary LIS name is
-    <b style="color:var(--white);">{{ test.labsmart_name }}</b>; add the HMO/branch billing variants (e.g. “MP IKEJA”, “MP NEM”) so uploads auto-match them all.
+    <b style="color:var(--white);">{{ test.labsmart_name }}</b>. Each variant is tagged with the
+    <b>branch</b> it belongs to (blank = follow the upload's collection centre). Mark
+    <b>Outsourced</b> for names sent to an external lab — those consume no reagents and
+    are credited to whichever branch outsourced them.
   </div>
 
   {% if test.aliases %}
-  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
-    {% for a in test.aliases|sort(attribute='alias') %}
-    <span style="display:inline-flex; align-items:center; gap:6px; background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:4px 6px 4px 12px; font-size:12px; color:var(--white);">
-      {{ a.alias }}
-      {% if a.branch %}<span style="font-size:10px; padding:1px 6px; background:rgba(245,130,31,0.15); border:1px solid rgba(245,130,31,0.3); border-radius:8px; color:var(--orange2);">{{ a.branch.name }}</span>{% endif %}
-      <form method="post" action="{{ url_for('inventory.delete_test_alias', test_id=test.id, alias_id=a.id) }}" style="margin:0;">
-        <button type="submit" title="Remove alias" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:14px; line-height:1; padding:0 2px;"
-          onclick="return confirm('Remove alias “{{ a.alias }}”?')">×</button>
-      </form>
-    </span>
-    {% endfor %}
-  </div>
+  <table style="margin-bottom:16px;">
+    <thead><tr>
+      <th>Alias</th><th style="width:150px;">Branch</th><th style="width:100px; text-align:center;">Outsourced</th><th style="width:130px;"></th>
+    </tr></thead>
+    <tbody>
+      {% for a in test.aliases|sort(attribute='alias') %}
+      <tr>
+        <td style="color:var(--white); font-size:12px;">
+          <form method="post" action="{{ url_for('inventory.edit_test_alias', test_id=test.id, alias_id=a.id) }}" id="af{{ a.id }}" style="margin:0; display:contents;"></form>
+          {{ a.alias }}
+          {% if a.is_outsourced %}<span style="margin-left:6px; font-size:10px; padding:1px 6px; background:rgba(120,160,255,.15); border:1px solid rgba(120,160,255,.3); border-radius:8px; color:#9db8ff;">outsourced</span>{% endif %}
+        </td>
+        <td>
+          <select name="branch_id" form="af{{ a.id }}" class="inp" style="font-size:12px; padding:5px 8px;">
+            <option value="">— collection centre —</option>
+            {% for b in branches %}
+            <option value="{{ b.id }}" {% if a.branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" name="is_outsourced" value="1" form="af{{ a.id }}" {% if a.is_outsourced %}checked{% endif %} style="width:15px; height:15px;">
+        </td>
+        <td style="text-align:right;">
+          <button type="submit" form="af{{ a.id }}" class="btn-outline" style="font-size:11px; padding:5px 10px;">Save</button>
+          <form method="post" action="{{ url_for('inventory.delete_test_alias', test_id=test.id, alias_id=a.id) }}" style="display:inline; margin:0;">
+            <button type="submit" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:11px; padding:5px 6px;"
+              onclick="return confirm('Remove alias “{{ a.alias }}”?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
   {% else %}
   <div style="color:var(--dim); font-size:12px; margin-bottom:16px;">No aliases yet.</div>
   {% endif %}
 
   <form method="post" action="{{ url_for('inventory.add_test_alias', test_id=test.id) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0;">
-    <input name="alias" class="inp" placeholder="Add a LabSmart name variant…" style="flex:1; min-width:220px; font-size:12px; padding:7px 12px;" required>
+    <input name="alias" class="inp" placeholder="Add a LabSmart name variant…" style="flex:1; min-width:200px; font-size:12px; padding:7px 12px;" required>
+    <select name="branch_id" class="inp" style="font-size:12px; padding:7px 10px; width:auto;">
+      <option value="">— collection centre —</option>
+      {% for b in branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+    </select>
+    <label style="display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); white-space:nowrap;">
+      <input type="checkbox" name="is_outsourced" value="1" style="width:15px; height:15px;"> Outsourced
+    </label>
     <button type="submit" class="btn-primary" style="font-size:12px; padding:7px 14px;">Add Alias</button>
   </form>
 </div>
