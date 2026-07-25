@@ -23,6 +23,24 @@
   </div>
 </div>
 
+{# Quick nav #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:22px;">
+  {% for label, url, icon in [
+    ('Items Catalogue', url_for('inventory.items'), 'M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM1 7h22M1 17h22'),
+    ('Test Catalogue', url_for('inventory.tests'), 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+    ('Packages', url_for('inventory.packages'), 'M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z'),
+    ('Adjust Stock', url_for('inventory.adjust_stock'), 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'),
+    ('LIS Uploads', url_for('inventory.uploads'), 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12'),
+    ('In Transit', url_for('inventory.in_transit_list'), 'M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3m-7 9h10l-3-9H9l-3 9zm0 0v0'),
+    ('Reports', url_for('inventory.reports'), 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'),
+  ] %}
+  <a href="{{ url }}" class="card" style="padding:16px; text-decoration:none; display:flex; align-items:center; gap:10px; transition:border-color .2s; border-color:var(--border);" onmouseover="this.style.borderColor='var(--orange)'" onmouseout="this.style.borderColor='var(--border)'">
+    <svg width="18" height="18" fill="none" stroke="var(--orange2)" stroke-width="1.8" viewBox="0 0 24 24"><path d="{{ icon }}"/></svg>
+    <span style="font-size:13px; font-weight:600; color:var(--white);">{{ label }}</span>
+  </a>
+  {% endfor %}
+</div>
+
 {# KPIs #}
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:28px;">
   <div class="kpi-card">
@@ -151,22 +169,4 @@
   </table>
 </div>
 {% endif %}
-
-{# Quick nav #}
-<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-top:20px;">
-  {% for label, url, icon in [
-    ('Items Catalogue', url_for('inventory.items'), 'M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM1 7h22M1 17h22'),
-    ('Test Catalogue', url_for('inventory.tests'), 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
-    ('Packages', url_for('inventory.packages'), 'M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z'),
-    ('Adjust Stock', url_for('inventory.adjust_stock'), 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'),
-    ('LIS Uploads', url_for('inventory.uploads'), 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12'),
-    ('In Transit', url_for('inventory.in_transit_list'), 'M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3m-7 9h10l-3-9H9l-3 9zm0 0v0'),
-    ('Reports', url_for('inventory.reports'), 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'),
-  ] %}
-  <a href="{{ url }}" class="card" style="padding:16px; text-decoration:none; display:flex; align-items:center; gap:10px; transition:border-color .2s; border-color:var(--border);" onmouseover="this.style.borderColor='var(--orange)'" onmouseout="this.style.borderColor='var(--border)'">
-    <svg width="18" height="18" fill="none" stroke="var(--orange2)" stroke-width="1.8" viewBox="0 0 24 24"><path d="{{ icon }}"/></svg>
-    <span style="font-size:13px; font-weight:600; color:var(--white);">{{ label }}</span>
-  </a>
-  {% endfor %}
-</div>
 {% endblock %}
