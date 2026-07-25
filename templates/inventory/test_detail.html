@@ -237,7 +237,7 @@
         <td style="color:var(--muted);">{{ m.item.unit }}</td>
         <td style="font-weight:600;">{{ m.qty_per_test|float|round(4) }}</td>
         <td style="color:var(--muted);">
-          {% if m.item.unit_price %}₦{{ '{:,.4f}'.format(m.item.unit_price * m.qty_per_test) }}{% else %}—{% endif %}
+          {% if m.item.unit_price %}₦{{ '{:,.2f}'.format(m.item.unit_price * m.qty_per_test) }}{% else %}—{% endif %}
         </td>
         <td>
           <form method="post" action="{{ url_for('inventory.delete_test_mapping', test_id=test.id, map_id=m.id) }}" style="margin:0;">
