@@ -146,20 +146,21 @@ def _best_package_match(name, all_pkgs):
 def _build_test_lookup(all_tests):
     """Exact-match lookup keyed by lowercased labsmart_name AND every alias.
 
-    Returns {name: (TestCatalogue, branch_id_or_None)}. labsmart_names are loaded
-    first with branch_id=None (→ fall back to the upload's collection centre); then
-    aliases override with their own branch_id, so a billing variant like "MP IKEJA"
-    both resolves to the malaria test AND carries the Ikeja attribution. One bulk
+    Returns {name: (TestCatalogue, branch_id_or_None, is_outsourced)}. labsmart_names
+    are loaded first with branch_id=None (→ fall back to the upload's collection
+    centre) and not outsourced; then aliases override with their own branch_id and
+    outsourced flag, so a variant like "MP IKEJA" resolves to the malaria test AND
+    carries the Ikeja attribution, while "PSA OS" is flagged outsourced. One bulk
     query for aliases — no per-test round-trips.
     """
     lookup = {}
     tests_by_id = {t.id: t for t in all_tests}
     for t in all_tests:
-        lookup[t.labsmart_name.strip().lower()] = (t, None)
+        lookup[t.labsmart_name.strip().lower()] = (t, None, False)
     for a in TestAlias.query.all():
         t = tests_by_id.get(a.test_id)
         if t and a.alias:
-            lookup[a.alias.strip().lower()] = (t, a.branch_id)
+            lookup[a.alias.strip().lower()] = (t, a.branch_id, bool(a.is_outsourced))
     return lookup
 
 
@@ -522,9 +523,29 @@ def add_test_alias(test_id):
         flash(f"'{alias}' is already the LIS name of '{other.name}'.", "error")
         return redirect(url_for("inventory.test_detail", test_id=test_id))
 
-    db.session.add(TestAlias(test_id=test_id, alias=alias))
+    outsourced = (request.form.get("is_outsourced") == "1")
+    branch_id  = request.form.get("branch_id", type=int) or None
+    if outsourced:
+        branch_id = None
+    db.session.add(TestAlias(test_id=test_id, alias=alias,
+                             branch_id=branch_id, is_outsourced=outsourced))
     db.session.commit()
     flash(f"Alias '{alias}' added.", "success")
+    return redirect(url_for("inventory.test_detail", test_id=test_id))
+
+
+@inventory_bp.route("/tests/<int:test_id>/aliases/<int:alias_id>/edit", methods=["POST"])
+@login_required
+@_inventory_access
+def edit_test_alias(test_id, alias_id):
+    """Manual reconciliation — change an alias's branch / outsourced flag."""
+    alias = TestAlias.query.filter_by(id=alias_id, test_id=test_id).first_or_404()
+    outsourced = (request.form.get("is_outsourced") == "1")
+    branch_id  = request.form.get("branch_id", type=int) or None
+    alias.is_outsourced = outsourced
+    alias.branch_id     = None if outsourced else branch_id
+    db.session.commit()
+    flash(f"Alias '{alias.alias}' updated.", "success")
     return redirect(url_for("inventory.test_detail", test_id=test_id))
 
 
@@ -546,11 +567,12 @@ def download_aliases_template():
     """Blank template for bulk alias import (one row per LabSmart name variant)."""
     si = io.StringIO()
     w  = csv.writer(si)
-    w.writerow(["Test", "Alias", "Branch", "Set Price", "Fee"])
-    w.writerow(["Malaria Parasite (MP)", "MP",       "ILASA", "yes", "3000"])
-    w.writerow(["Malaria Parasite (MP)", "MP IKEJA", "Ikeja", "yes", "4000"])
-    w.writerow(["Malaria Parasite (MP)", "MP NEM",   "ILASA", "no",  "2000"])
-    w.writerow(["Blood Group",           "BLOOD GROUP SURE IJOFI", "Ijofi", "yes", "2000"])
+    w.writerow(["Test", "Alias", "Branch", "Set Price", "Fee", "Outsourced"])
+    w.writerow(["Malaria Parasite (MP)", "MP",       "ILASA", "yes", "3000", "no"])
+    w.writerow(["Malaria Parasite (MP)", "MP IKEJA", "Ikeja", "yes", "4000", "no"])
+    w.writerow(["Malaria Parasite (MP)", "MP NEM",   "ILASA", "no",  "2000", "no"])
+    w.writerow(["Blood Group",           "BLOOD GROUP SURE IJOFI", "Ijofi", "yes", "2000", "no"])
+    w.writerow(["PSA",                   "PSA OS",   "",      "no",  "6720", "yes"])
     resp = Response(si.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = "attachment; filename=test_aliases_template.csv"
     return resp
@@ -597,6 +619,7 @@ def import_aliases():
         branch_col = find("branch")
         setp_col   = find("set price", "setprice")
         fee_col    = find("fee", "price")
+        outs_col   = find("outsourced", "os")
         if not test_col or not (alias_col or aliases_col):
             flash("CSV must have a 'Test' column and an 'Alias' (or 'Aliases') column.", "error")
             return redirect(url_for("inventory.tests"))
@@ -638,9 +661,13 @@ def import_aliases():
                 unmatched_rows.append(test_key)
                 continue
 
+            # Outsourced variants: any branch can do it → no fixed branch (use the
+            # collection centre at match time), and no reagent is consumed.
+            outsourced = (row.get(outs_col) or "").strip().lower() in ("yes", "y", "true", "1") if outs_col else False
+
             # Resolve branch (blank/unknown → None → collection centre at match time)
             branch = None
-            if branch_col:
+            if branch_col and not outsourced:
                 branch = branches_by_name.get((row.get(branch_col) or "").strip().lower())
 
             for alias in aliases:
@@ -653,22 +680,25 @@ def import_aliases():
                     if existing.test_id != test.id:
                         conflicts += 1       # already maps to a different test — leave it
                     else:
+                        changed = False
                         if branch is not None and existing.branch_id != branch.id:
-                            existing.branch_id = branch.id
-                            updated += 1
-                        else:
-                            skipped += 1
+                            existing.branch_id = branch.id; changed = True
+                        if existing.is_outsourced != outsourced:
+                            existing.is_outsourced = outsourced; changed = True
+                        updated += 1 if changed else 0
+                        skipped += 0 if changed else 1
                     continue
                 a = TestAlias(test_id=test.id, alias=alias,
-                              branch_id=branch.id if branch else None)
+                              branch_id=None if outsourced else (branch.id if branch else None),
+                              is_outsourced=outsourced)
                 db.session.add(a)
                 alias_objs[ak] = a
                 added += 1
 
-            # Pricing — only on an EXACT test match, and only when asked
+            # Pricing — only on an EXACT test match, only when asked, never for outsourced
             set_price = (row.get(setp_col) or "").strip().lower() in ("yes", "y", "true", "1") if setp_col else False
             fee_raw   = (row.get(fee_col) or "").replace(",", "").strip() if fee_col else ""
-            if set_price and fee_raw and branch is not None:
+            if set_price and not outsourced and fee_raw and branch is not None:
                 if not exact:
                     price_skipped_fuzzy += 1
                     continue
@@ -1365,12 +1395,17 @@ def apply_upload(upload_id):
             key = inv.lower()
 
             # 1. Exact test / alias match. An alias may carry its own branch (the
-            #    HMO/branch billing variant); use it, else the row's collection centre.
+            #    HMO/branch billing variant) and/or be outsourced.
             hit = test_exact.get(key)
             if hit:
-                test, alias_branch = hit
-                b = alias_branch if alias_branch is not None else branch_id
-                _accumulate(consumption, test, b)
+                test, alias_branch, outsourced = hit
+                if outsourced:
+                    # Outsourced to an external lab: any branch can do it, so credit
+                    # the collection centre; no reagent is consumed here.
+                    b = branch_id
+                else:
+                    b = alias_branch if alias_branch is not None else branch_id
+                    _accumulate(consumption, test, b)
                 vk = (test.id, b)
                 test_volumes[vk] = test_volumes.get(vk, 0) + 1
                 continue
