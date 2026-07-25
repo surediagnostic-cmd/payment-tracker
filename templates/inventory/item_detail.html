@@ -24,7 +24,8 @@
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:13px;">
       <div><span style="color:var(--muted);">Unit:</span> <strong>{{ item.unit }}</strong></div>
       <div><span style="color:var(--muted);">Pack Size:</span> <strong>{{ item.pack_size or '—' }}</strong>{% if item.purchase_unit %} <span style="color:var(--muted); font-size:.82rem;">(per {{ item.purchase_unit }})</span>{% endif %}</div>
-      <div><span style="color:var(--muted);">Unit Price:</span> <strong>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}—{% endif %}</strong></div>
+      <div><span style="color:var(--muted);">Pack Price:</span> <strong>{% if item.pack_price %}₦{{ '{:,.2f}'.format(item.pack_price) }}{% else %}—{% endif %}</strong></div>
+      <div><span style="color:var(--muted);">Unit Price:</span> <strong>{% if item.unit_price %}₦{{ '{:,.2f}'.format(item.unit_price) }}{% else %}—{% endif %}</strong>{% if item.pack_price and item.pack_size %} <span style="color:var(--muted); font-size:.82rem;">(₦{{ '{:,.0f}'.format(item.pack_price) }} ÷ {{ item.pack_size }})</span>{% endif %}</div>
       <div><span style="color:var(--muted);">Reorder Level:</span> <strong>{{ (item.reorder_level | float | round(0) | int) if item.reorder_level else '—' }} {{ item.unit if item.reorder_level else '' }}</strong></div>
       <div style="grid-column:1/-1;"><span style="color:var(--muted);">Total Stock:</span>
         <strong style="color:{% if item.is_low_stock %}var(--red){% elif item.total_stock > 0 %}var(--green){% else %}var(--muted){% endif %};">
@@ -177,7 +178,7 @@
         </div>
         <div>
           <label class="label">Pack Size (units/pack)</label>
-          <input name="pack_size" class="inp" type="number" min="1" value="{{ item.pack_size or '' }}">
+          <input name="pack_size" class="inp" type="number" min="1" value="{{ item.pack_size or '' }}" oninput="calcUnit(this.form)">
         </div>
         <div>
           <label class="label">Purchase Unit Label</label>
@@ -185,8 +186,13 @@
                  value="{{ item.purchase_unit or '' }}">
         </div>
         <div>
-          <label class="label">Unit Price (₦)</label>
+          <label class="label">Pack Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— what you pay per pack</span></label>
+          <input name="pack_price" class="inp" type="number" step="0.01" value="{{ item.pack_price or '' }}" placeholder="e.g. 82000" oninput="calcUnit(this.form)">
+        </div>
+        <div>
+          <label class="label">Unit Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— per unit; auto = pack ÷ pack size</span></label>
           <input name="unit_price" class="inp" type="number" step="0.01" value="{{ item.unit_price or '' }}">
+          <div id="unitHint" style="font-size:11px; color:var(--muted); margin-top:4px;"></div>
         </div>
         <div>
           <label class="label">Reorder Level</label>
@@ -204,6 +210,21 @@
     </form>
   </div>
 </div>
+<script>
+// Auto-derive unit price = pack price / pack size
+function calcUnit(form) {
+  var pp = parseFloat(form.pack_price && form.pack_price.value);
+  var ps = parseInt(form.pack_size && form.pack_size.value, 10);
+  var hint = form.querySelector('#unitHint');
+  if (pp > 0 && ps > 0) {
+    var u = Math.round((pp / ps) * 100) / 100;
+    if (form.unit_price) form.unit_price.value = u;
+    if (hint) hint.textContent = '= ₦' + pp.toLocaleString() + ' ÷ ' + ps + ' = ₦' + u.toLocaleString() + ' per unit';
+  } else if (hint) {
+    hint.textContent = '';
+  }
+}
+</script>
 {% endblock %}
 
 
