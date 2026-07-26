@@ -197,14 +197,24 @@ def dashboard():
     total_items     = InventoryItem.query.filter_by(is_active=True).count()
     pending_uploads = LisUpload.query.filter_by(status='pending_review').count()
 
-    low_stock_q = (
-        db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
-        .outerjoin(StockLevel, StockLevel.item_id == InventoryItem.id)
-        .filter(InventoryItem.is_active == True, InventoryItem.reorder_level != None)
-    )
-    if user_branch_ids is not None:
-        low_stock_q = low_stock_q.filter(
-            (StockLevel.branch_id == None) | (StockLevel.branch_id.in_(user_branch_ids))
+    # For MDS: outerjoin so items with zero stock still appear in the alert list.
+    # For branch users: inner join so only items actually stocked at their branches
+    # are checked — avoids false alerts for items never received at their location.
+    if user_branch_ids is None:
+        low_stock_q = (
+            db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
+            .outerjoin(StockLevel, StockLevel.item_id == InventoryItem.id)
+            .filter(InventoryItem.is_active == True, InventoryItem.reorder_level != None)
+        )
+    else:
+        low_stock_q = (
+            db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
+            .join(StockLevel, StockLevel.item_id == InventoryItem.id)
+            .filter(
+                InventoryItem.is_active == True,
+                InventoryItem.reorder_level != None,
+                StockLevel.branch_id.in_(user_branch_ids),
+            )
         )
     low_stock = (
         low_stock_q
