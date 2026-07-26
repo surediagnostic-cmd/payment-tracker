@@ -197,31 +197,22 @@ def dashboard():
     total_items     = InventoryItem.query.filter_by(is_active=True).count()
     pending_uploads = LisUpload.query.filter_by(status='pending_review').count()
 
-    # For MDS: outerjoin so items with zero stock still appear in the alert list.
-    # For branch users: inner join so only items actually stocked at their branches
-    # are checked — avoids false alerts for items never received at their location.
-    if user_branch_ids is None:
-        low_stock_q = (
-            db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
-            .outerjoin(StockLevel, StockLevel.item_id == InventoryItem.id)
-            .filter(InventoryItem.is_active == True, InventoryItem.reorder_level != None)
+    # Per-branch low stock: one row per (item, branch) below reorder level.
+    # MDS sees all branches; branch users see only their branches.
+    # Inner join means only items that have been received at a branch ever appear.
+    low_stock_q = (
+        db.session.query(InventoryItem, Branch, StockLevel.qty_on_hand)
+        .join(StockLevel, StockLevel.item_id == InventoryItem.id)
+        .join(Branch, Branch.id == StockLevel.branch_id)
+        .filter(
+            InventoryItem.is_active == True,
+            InventoryItem.reorder_level != None,
+            StockLevel.qty_on_hand < InventoryItem.reorder_level,
         )
-    else:
-        low_stock_q = (
-            db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
-            .join(StockLevel, StockLevel.item_id == InventoryItem.id)
-            .filter(
-                InventoryItem.is_active == True,
-                InventoryItem.reorder_level != None,
-                StockLevel.branch_id.in_(user_branch_ids),
-            )
-        )
-    low_stock = (
-        low_stock_q
-        .group_by(InventoryItem.id)
-        .having(func.coalesce(func.sum(StockLevel.qty_on_hand), 0) < InventoryItem.reorder_level)
-        .all()
     )
+    if user_branch_ids is not None:
+        low_stock_q = low_stock_q.filter(Branch.id.in_(user_branch_ids))
+    low_stock = low_stock_q.order_by(Branch.name, InventoryItem.name).all()
 
     txn_q = StockTransaction.query
     if user_branch_ids is not None:
