@@ -191,39 +191,54 @@ def _parse_date(s):
 @login_required
 @_inventory_access
 def dashboard():
-    total_items    = InventoryItem.query.filter_by(is_active=True).count()
+    # MDS sees everything; all other roles see only their assigned branches
+    user_branch_ids = None if current_user.is_mds else [b.id for b in current_user.branches]
+
+    total_items     = InventoryItem.query.filter_by(is_active=True).count()
     pending_uploads = LisUpload.query.filter_by(status='pending_review').count()
 
-    low_stock = (
+    low_stock_q = (
         db.session.query(InventoryItem, func.sum(StockLevel.qty_on_hand).label('total'))
         .outerjoin(StockLevel, StockLevel.item_id == InventoryItem.id)
         .filter(InventoryItem.is_active == True, InventoryItem.reorder_level != None)
+    )
+    if user_branch_ids is not None:
+        low_stock_q = low_stock_q.filter(
+            (StockLevel.branch_id == None) | (StockLevel.branch_id.in_(user_branch_ids))
+        )
+    low_stock = (
+        low_stock_q
         .group_by(InventoryItem.id)
         .having(func.coalesce(func.sum(StockLevel.qty_on_hand), 0) < InventoryItem.reorder_level)
         .all()
     )
 
-    recent_txns = (
-        StockTransaction.query
-        .order_by(StockTransaction.created_at.desc())
-        .limit(12).all()
-    )
+    txn_q = StockTransaction.query
+    if user_branch_ids is not None:
+        txn_q = txn_q.filter(
+            (StockTransaction.branch_id == None) | (StockTransaction.branch_id.in_(user_branch_ids))
+        )
+    recent_txns = txn_q.order_by(StockTransaction.created_at.desc()).limit(12).all()
 
     recent_uploads = LisUpload.query.order_by(LisUpload.created_at.desc()).limit(5).all()
 
     from models import InTransitStock
-    in_transit_count = InTransitStock.query.filter_by(status="in_transit").count()
+    it_q = InTransitStock.query.filter_by(status="in_transit")
+    if user_branch_ids is not None:
+        it_q = it_q.filter(InTransitStock.branch_id.in_(user_branch_ids))
+    in_transit_count = it_q.count()
 
     # Low-margin tests with recent volume (last 90 days)
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=90)
     low_margin_tests = []
     try:
-        vol_test_ids = {
-            row[0] for row in
-            db.session.query(TestVolumeLog.test_id)
-            .filter(TestVolumeLog.created_at >= cutoff).distinct().all()
-        }
+        vol_q = db.session.query(TestVolumeLog.test_id).filter(TestVolumeLog.created_at >= cutoff)
+        if user_branch_ids is not None:
+            vol_q = vol_q.filter(
+                (TestVolumeLog.branch_id == None) | (TestVolumeLog.branch_id.in_(user_branch_ids))
+            )
+        vol_test_ids = {row[0] for row in vol_q.distinct().all()}
         if vol_test_ids:
             for t in TestCatalogue.query.filter(
                 TestCatalogue.id.in_(vol_test_ids), TestCatalogue.is_active == True
@@ -322,11 +337,22 @@ def add_item():
 @_inventory_access
 def item_detail(item_id):
     item = InventoryItem.query.get_or_404(item_id)
-    stock_levels = StockLevel.query.filter_by(item_id=item_id).all()
-    txns = (StockTransaction.query
-            .filter_by(item_id=item_id)
-            .order_by(StockTransaction.created_at.desc())
-            .limit(30).all())
+    user_branch_ids = None if current_user.is_mds else [b.id for b in current_user.branches]
+
+    sl_q = StockLevel.query.filter_by(item_id=item_id)
+    if user_branch_ids is not None:
+        sl_q = sl_q.filter(
+            (StockLevel.branch_id == None) | (StockLevel.branch_id.in_(user_branch_ids))
+        )
+    stock_levels = sl_q.all()
+
+    txn_q = StockTransaction.query.filter_by(item_id=item_id)
+    if user_branch_ids is not None:
+        txn_q = txn_q.filter(
+            (StockTransaction.branch_id == None) | (StockTransaction.branch_id.in_(user_branch_ids))
+        )
+    txns = txn_q.order_by(StockTransaction.created_at.desc()).limit(30).all()
+
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     all_tests = TestCatalogue.query.filter_by(is_active=True).order_by(TestCatalogue.name).all()
     try:
