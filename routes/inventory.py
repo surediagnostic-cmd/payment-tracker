@@ -1830,9 +1830,24 @@ def confirm_receipt(transit_id):
 
     ref_label = transit.payment_request.reference if transit.payment_request else f"PR#{transit.payment_request_id}"
     inv_item  = InventoryItem.query.get(transit.inventory_item_id)
-    recv_qty  = float(transit.qty)
+
+    # Use qty entered on the confirm form; fall back to stored qty if blank/invalid
+    qty_form = request.form.get("qty_received", "").strip()
+    try:
+        submitted_qty = float(qty_form) if qty_form else float(transit.qty)
+        if submitted_qty <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        submitted_qty = float(transit.qty)
+
+    # If the item is purchased in packs, expand pack qty → unit qty
+    recv_qty = submitted_qty
     if inv_item and inv_item.pack_size and recv_qty > 0:
         recv_qty = recv_qty * inv_item.pack_size
+
+    # Update stored qty to match what was actually received
+    transit.qty = submitted_qty
+
     _apply_txn(
         item_id=transit.inventory_item_id,
         branch_id=transit.branch_id,
@@ -1848,7 +1863,7 @@ def confirm_receipt(transit_id):
     transit.confirmed_at = datetime.now(timezone.utc)
     db.session.commit()
 
-    flash(f"Receipt confirmed — {transit.inventory_item.name} stock updated.", "success")
+    flash(f"Receipt confirmed — {recv_qty:g} {inv_item.unit if inv_item else ''} of {transit.inventory_item.name} added to stock.", "success")
     return redirect(url_for("inventory.in_transit_list"))
 
 
