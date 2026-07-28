@@ -40,7 +40,11 @@
           <span class="badge badge-gray">{{ t.inventory_item.category_label }}</span>
         </td>
         <td style="font-weight:700; color:var(--white);">
-          {{ t.qty|float|round(2) }} {{ t.inventory_item.unit }}
+          {{ t.qty|float|round(2) }}
+          <span style="color:var(--muted); font-size:12px; font-weight:400;">{{ t.inventory_item.unit }}</span>
+          {% if t.status == 'in_transit' %}
+          <div style="font-size:11px; color:var(--dim); margin-top:2px;">adjust below if different</div>
+          {% endif %}
         </td>
         <td style="color:var(--muted);">{{ t.branch.name if t.branch else '—' }}</td>
         <td>
@@ -63,9 +67,14 @@
         </td>
         <td>
           {% if t.status == 'in_transit' %}
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
             <form method="POST" action="{{ url_for('inventory.confirm_receipt', transit_id=t.id) }}"
-                  onsubmit="return confirm('Confirm receipt of {{ t.qty|float|round(2) }} {{ t.inventory_item.unit }} of {{ t.inventory_item.name|replace("'","\\'")|safe }}?');">
+                  style="display:flex; align-items:center; gap:6px;"
+                  onsubmit="return confirm('Confirm receipt of ' + this.qty_received.value + ' {{ t.inventory_item.unit }} of {{ t.inventory_item.name|replace("'","\\'")|safe }}?');">
+              <input name="qty_received" type="number" step="0.01" min="0.01"
+                     value="{{ t.qty|float|round(2) }}"
+                     style="width:80px; padding:5px 8px; font-size:12px; background:var(--bg2); border:1px solid var(--border); border-radius:6px; color:var(--white); text-align:center;"
+                     title="Actual qty received — edit if different from expected">
               <button class="btn-primary" style="padding:5px 12px; font-size:12px;">
                 ✓ Confirm
               </button>
