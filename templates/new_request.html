@@ -335,22 +335,25 @@ function onInvChange(uid) {
   const calcEl  = panel.querySelector('[data-inv-calc]');
 
   if (!opt || !opt.value) {
-    if (labelEl) labelEl.textContent = 'Qty to Receive';
+    if (labelEl) { labelEl.innerHTML = 'Qty to Receive'; }
     if (calcEl)  { calcEl.style.display = 'none'; calcEl.textContent = ''; }
-    if (qOrd)    qOrd.value = '';
+    if (qOrd)    { qOrd.value = ''; qOrd.placeholder = '—'; qOrd.style.borderColor = ''; }
     return;
   }
 
   const ps = parseInt(opt.dataset.packSize || '0');
   const pu = opt.dataset.purchaseUnit || '';
+  const unit = opt.dataset.unit || '';
 
   // Auto-populate qty_ordered from row qty only if currently blank
   if (qOrd && !qOrd.value) {
     const row = panel.closest('.item-row');
-    qOrd.value = parseFloat(row && row.querySelector('.qty-input') && row.querySelector('.qty-input').value) || 1;
+    qOrd.value = parseFloat(row && row.querySelector('.qty-input') && row.querySelector('.qty-input').value) || '';
   }
 
-  if (labelEl) labelEl.textContent = ps > 0 ? (pu || 'Pack') + 's to Receive' : 'Qty to Receive';
+  const baseLabel = ps > 0 ? (pu || 'Pack') + 's to Receive' : 'Qty to Receive' + (unit ? ` (${unit}s)` : '');
+  if (labelEl) labelEl.innerHTML = `${baseLabel} <span style="color:var(--red);">*</span>`;
+  if (qOrd)    qOrd.placeholder = 'required';
   refreshInvCalcDisplay(uid);
 }
 
@@ -537,6 +540,13 @@ document.getElementById('prForm').addEventListener('submit', function(e) {
       const cInvPanel = childRow.querySelector('[data-inv-panel]');
       const cInvId  = cInvPanel ? (cInvPanel.querySelector('[data-field="inventory_item_id"]') || {}).value || '' : '';
       const cInvQty = cInvPanel ? (cInvPanel.querySelector('[data-field="qty_ordered"]') || {}).value || '' : '';
+      if (cInvId && (!cInvQty || parseFloat(cInvQty) <= 0)) {
+        e.preventDefault();
+        const cInvSel = cInvPanel && cInvPanel.querySelector('[data-field="inventory_item_id"]');
+        const cInvName = cInvSel && cInvSel.options[cInvSel.selectedIndex] ? cInvSel.options[cInvSel.selectedIndex].text : 'the tagged item';
+        alert(`Qty to Receive is required for: ${cInvName}\n\nPlease enter how many units/kits/packs you expect to receive.`);
+        valid = false; return;
+      }
       children.push({
         description:       cDesc,
         category_id:       cCatId,
@@ -561,6 +571,13 @@ document.getElementById('prForm').addEventListener('submit', function(e) {
     const pInvPanel = parentRow.querySelector('[data-inv-panel]');
     const pInvId  = pInvPanel ? (pInvPanel.querySelector('[data-field="inventory_item_id"]') || {}).value || '' : '';
     const pInvQty = pInvPanel ? (pInvPanel.querySelector('[data-field="qty_ordered"]') || {}).value || '' : '';
+    if (pInvId && (!pInvQty || parseFloat(pInvQty) <= 0)) {
+      e.preventDefault();
+      const pInvSel = pInvPanel && pInvPanel.querySelector('[data-field="inventory_item_id"]');
+      const pInvName = pInvSel && pInvSel.options[pInvSel.selectedIndex] ? pInvSel.options[pInvSel.selectedIndex].text : 'the tagged item';
+      alert(`Qty to Receive is required for: ${pInvName}\n\nPlease enter how many units/kits/packs you expect to receive.`);
+      valid = false; return;
+    }
     items.push({
       description:       desc,
       category_id:       catId,
