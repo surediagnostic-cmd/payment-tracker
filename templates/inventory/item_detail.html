@@ -173,17 +173,20 @@
           </select>
         </div>
         <div>
-          <label class="label">Unit</label>
-          <input name="unit" class="inp" value="{{ item.unit }}">
+          <label class="label">Unit <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— smallest thing you count/consume</span></label>
+          <input name="unit" class="inp" value="{{ item.unit }}" placeholder="e.g. test / piece / strip / pair">
+          <div style="font-size:11px; color:var(--muted); margin-top:4px;">e.g. Creatinine → <em>test</em> &nbsp;|&nbsp; X-Ray Film → <em>piece</em> &nbsp;|&nbsp; Gloves → <em>pair</em></div>
         </div>
         <div>
-          <label class="label">Pack Size (units/pack)</label>
-          <input name="pack_size" class="inp" type="number" min="1" value="{{ item.pack_size or '' }}" oninput="calcUnit(this.form)">
+          <label class="label">Pack Size <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— units per purchase pack</span></label>
+          <input name="pack_size" class="inp" type="number" min="1" value="{{ item.pack_size or '' }}" oninput="calcUnit(this.form)" placeholder="e.g. 200">
+          <div style="font-size:11px; color:var(--muted); margin-top:4px;">e.g. a kit of 200 tests → <em>200</em></div>
         </div>
         <div>
-          <label class="label">Purchase Unit Label</label>
-          <input name="purchase_unit" class="inp" placeholder="Pack / Box / Kit / Bottle"
+          <label class="label">Purchase Unit Label <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— what you buy</span></label>
+          <input name="purchase_unit" class="inp" placeholder="Kit / Box / Pack / Bottle / Carton"
                  value="{{ item.purchase_unit or '' }}">
+          <div style="font-size:11px; color:var(--muted); margin-top:4px;">e.g. Creatinine → <em>kit</em> &nbsp;|&nbsp; Gloves → <em>box</em></div>
         </div>
         <div>
           <label class="label">Pack Price (₦) <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">— what you pay per pack</span></label>
