@@ -61,6 +61,7 @@ def create_app():
     from routes.budget import budget_bp
     from routes.inventory import inventory_bp
     from routes.revenue_share import revenue_share_bp
+    from routes.imprest import imprest_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(requests_bp)
@@ -70,11 +71,14 @@ def create_app():
     app.register_blueprint(budget_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(revenue_share_bp)
+    app.register_blueprint(imprest_bp)
 
     @app.route("/")
     def root():
         from flask_login import current_user
         if current_user.is_authenticated:
+            if current_user.role in ("branch_manager", "cashier"):
+                return redirect(url_for("imprest.dashboard"))
             return redirect(url_for("requests.dashboard"))
         return redirect(url_for("auth.login"))
 
@@ -504,6 +508,23 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] inventory_items pack_price: {e}")
 
+    # 18. imprest_account_id column on payment_requests (float funding via payments).
+    #     Plain INTEGER (no DB-level FK) since imprest_accounts is created later by
+    #     create_all; the SQLAlchemy relationship works off the column regardless.
+    #     imprest_accounts / expenses / imprest_activity_log tables auto-create via create_all.
+    if 'payment_requests' in tables:
+        pr_cols = {col['name'] for col in insp.get_columns('payment_requests')}
+        if 'imprest_account_id' not in pr_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE payment_requests ADD COLUMN imprest_account_id INTEGER"
+                ))
+                db.session.commit()
+                print("[migration] added imprest_account_id to payment_requests")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] payment_requests imprest_account_id: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
@@ -546,6 +567,70 @@ def _seed_defaults():
         print("Default MDS account created: admin@surediagnostics.com / Admin@1234")
 
     _seed_inventory()
+    _seed_imprest()
+
+
+def _seed_imprest():
+    """Ensure expense-account categories and the branch imprest accounts exist."""
+    from models import Category, Branch, ImprestAccount
+    from sqlalchemy import func as _func
+
+    # Expense-account categories (from the Zoho export) — add any that are missing
+    expense_accounts = [
+        "Airtime", "BTA Expense", "Cleaning Expense", "Cleaning equipments",
+        "Commission/Bonus", "Consultants/ Doctors fee", "Diesel", "Domestic Lawma",
+        "Electricity", "Facility Maintenance", "Gen Engine Oil", "Gen Fuel",
+        "Generator Repairs/Maintenance", "Glove", "IT/Comp./Elect Repairs & Maintenance",
+        "Internet Data Subscription", "Lab Consumables/ Reagents",
+        "Lab Equipment Repairs/Maintenance", "Legal Prof Fee", "Local Transport",
+        "Marketing Expenses", "Meals and Entertainment", "Office Equipment",
+        "Office Supplies", "Outsourced Test", "Printing and Stationery",
+        "Professional Fees", "Rent Expense", "Repairs and Maintenance",
+        "Salaries & Wages", "Scan Gel/ Consumables", "Staff Bonuses", "Water",
+        "customer refunds", "xray film printing",
+    ]
+    direct = {"outsourced test", "lab consumables/ reagents", "scan gel/ consumables"}
+    try:
+        existing = {c.name.strip().lower() for c in Category.query.all()}
+        added = 0
+        for name in expense_accounts:
+            if name.strip().lower() not in existing:
+                db.session.add(Category(
+                    name=name,
+                    cost_type="direct_cost" if name.strip().lower() in direct else "overhead",
+                ))
+                added += 1
+        if added:
+            db.session.commit()
+            print(f"[seed] added {added} expense categories")
+    except Exception as e:
+        db.session.rollback()
+        print(f"[seed] expense categories: {e}")
+
+    # Branch imprest accounts (created once)
+    try:
+        if ImprestAccount.query.count() == 0:
+            def bid(nm):
+                b = Branch.query.filter(_func.lower(Branch.name) == nm.lower()).first()
+                return b.id if b else None
+            seed_accounts = [
+                ("Imprest Cash/ Float - Ilasa", "ILASA", "Imprest_Float/Ilasa"),
+                ("Imprest Cash/ Float Palm Avenue", "Palm Avenue", None),
+                ("Kuda Sure Ijofi Ilesa Imprest Acct.", "Ijofi", None),
+                ("Imprest Cash- Ilesha", "Ijofi", None),
+                ("Zenith (OAUTH)", "OAUTH", None),
+                ("Zenith Account(Ijofi)", "Ijofi", None),
+            ]
+            for name, branch_name, code in seed_accounts:
+                db.session.add(ImprestAccount(
+                    name=name, branch_id=bid(branch_name),
+                    account_code=code, float_amount=0, low_threshold_pct=20,
+                ))
+            db.session.commit()
+            print(f"[seed] created {len(seed_accounts)} imprest accounts")
+    except Exception as e:
+        db.session.rollback()
+        print(f"[seed] imprest accounts: {e}")
 
 
 def _seed_inventory():
