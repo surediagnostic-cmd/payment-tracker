@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Imprest Accounts{% endblock %}
+{% block page_title %}Imprest — Accounts{% endblock %}
+{% block content %}
+
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <a href="{{ url_for('imprest.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Imprest</a>
+    <h1 class="section-title" style="margin-top:4px;">Imprest Accounts</h1>
+  </div>
+  {% if can_admin %}
+  <button onclick="document.getElementById('addModal').style.display='flex'" class="btn-primary">+ Add Account</button>
+  {% endif %}
+</div>
+
+<div class="card" style="overflow:hidden;">
+  <table>
+    <thead><tr><th>Account</th><th>Branch</th><th>Code</th><th style="text-align:right;">Float</th><th style="text-align:right;">Balance</th><th style="text-align:right;">Threshold</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for a in accounts %}
+      <tr>
+        <td><a href="{{ url_for('imprest.account_detail', account_id=a.id) }}" style="color:var(--orange2); font-weight:600;">{{ a.name }}</a></td>
+        <td style="color:var(--muted);">{{ a.branch.name if a.branch else '—' }}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.account_code or '—' }}</td>
+        <td style="text-align:right; color:var(--muted);">{% if a.float_amount and a.float_amount|float > 0 %}₦{{ '{:,.0f}'.format(a.float_amount | float) }}{% else %}<span style="color:var(--dim);">not set</span>{% endif %}</td>
+        <td style="text-align:right; font-weight:700; color:var(--white);">₦{{ '{:,.0f}'.format(a.balance) }}</td>
+        <td style="text-align:right; color:var(--muted);">{{ a.low_threshold_pct | float | round(0) | int }}%</td>
+        <td>{% if a.is_low %}<span class="badge badge-red">Low</span>{% elif a.float_amount and a.float_amount|float > 0 %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-gray">—</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:30px;">No accounts yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_admin %}
+<div id="addModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:460px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Add Imprest Account</div>
+      <button onclick="document.getElementById('addModal').style.display='none'" style="background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('imprest.add_account') }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div><label class="label">Account Name *</label><input name="name" class="inp" required placeholder="e.g. Imprest Cash/Float - Ilasa"></div>
+        <div><label class="label">Branch</label>
+          <select name="branch_id" class="inp"><option value="">—</option>{% for b in branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}</select>
+        </div>
+        <div><label class="label">Account Code</label><input name="account_code" class="inp" placeholder="optional"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div><label class="label">Float Amount (₦)</label><input name="float_amount" type="number" step="0.01" class="inp" placeholder="e.g. 100000"></div>
+          <div><label class="label">Low Threshold (%)</label><input name="low_threshold_pct" type="number" step="0.01" class="inp" value="20"></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Create</button>
+        <button type="button" onclick="document.getElementById('addModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
