@@ -52,6 +52,18 @@ class User(UserMixin, db.Model):
         return self.role in ("mds", "accountant", "lab_staff")
 
     @property
+    def is_branch_manager(self):
+        return self.role == "branch_manager"
+
+    @property
+    def is_cashier(self):
+        return self.role == "cashier"
+
+    @property
+    def can_use_imprest(self):
+        return self.role in ("mds", "accountant", "branch_manager", "cashier")
+
+    @property
     def branch(self):
         return self.branches[0] if self.branches else None
 
@@ -75,6 +87,8 @@ class PaymentRequest(db.Model):
     submitted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     reviewed_at = db.Column(db.DateTime, nullable=True)
+    # When set, this payment funds a branch imprest float (credited on disbursement)
+    imprest_account_id = db.Column(db.Integer, db.ForeignKey("imprest_accounts.id", ondelete="SET NULL"), nullable=True)
     items = db.relationship('PaymentRequestItem', backref='request', cascade='all, delete-orphan', lazy=True)
 
     @staticmethod
@@ -637,3 +651,118 @@ class BranchAllocationTemplate(db.Model):
     branch       = db.relationship('Branch')
     recipient    = db.relationship('RevenueShareRecipient')
     __table_args__ = (db.UniqueConstraint('branch_id', 'recipient_id', name='uq_bat_branch_recipient'),)
+
+
+# ── Imprest & Expense management ──────────────────────────────────────────────
+
+class ImprestAccount(db.Model):
+    """A branch cash/bank float. Funded via disbursed PaymentRequests, drawn down
+    by Expenses. Low-balance alert fires at <= low_threshold_pct of float_amount."""
+    __tablename__ = "imprest_accounts"
+    id                = db.Column(db.Integer, primary_key=True)
+    name              = db.Column(db.String(200), nullable=False)
+    branch_id         = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="SET NULL"), nullable=True)
+    account_code      = db.Column(db.String(80), nullable=True)
+    float_amount      = db.Column(db.Numeric(14, 2), nullable=False, default=0)   # standard full float
+    low_threshold_pct = db.Column(db.Numeric(5, 2), nullable=False, default=20)
+    is_active         = db.Column(db.Boolean, default=True)
+    created_at        = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    branch           = db.relationship("Branch")
+    expenses         = db.relationship("Expense", back_populates="account", cascade="all, delete-orphan", lazy=True)
+    funding_payments = db.relationship("PaymentRequest", backref="imprest_account", lazy=True)
+
+    @property
+    def total_released(self):
+        # Money actually disbursed into the float (approved AND marked uploaded/paid)
+        total = 0.0
+        for pr in self.funding_payments:
+            if pr.status == "approved" and pr.upload_status == "uploaded":
+                total += float(pr.approved_amount or pr.requested_amount or 0)
+        return total
+
+    @property
+    def total_spent(self):
+        return sum(float(e.amount or 0) for e in self.expenses)
+
+    @property
+    def balance(self):
+        return round(self.total_released - self.total_spent, 2)
+
+    @property
+    def pct_remaining(self):
+        f = float(self.float_amount or 0)
+        if f <= 0:
+            return None
+        return round(self.balance / f * 100, 1)
+
+    @property
+    def is_low(self):
+        f = float(self.float_amount or 0)
+        if f <= 0:
+            return False
+        return self.balance <= f * float(self.low_threshold_pct or 20) / 100.0
+
+
+class Expense(db.Model):
+    """A single expense drawn from an imprest account. Field set mirrors the Zoho
+    Books expense export so data round-trips on import/export."""
+    __tablename__ = "expenses"
+    id                  = db.Column(db.Integer, primary_key=True)
+    date                = db.Column(db.Date, nullable=False)
+    description         = db.Column(db.String(500), nullable=True)
+    category_id         = db.Column(db.Integer, db.ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)   # Expense Account
+    account_id          = db.Column(db.Integer, db.ForeignKey("imprest_accounts.id", ondelete="CASCADE"), nullable=False)  # Paid Through
+    branch_id           = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="SET NULL"), nullable=True)
+    vendor              = db.Column(db.String(200), nullable=True)
+    amount              = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    total               = db.Column(db.Numeric(14, 2), nullable=True)
+    # tax
+    tax_name            = db.Column(db.String(100), nullable=True)
+    tax_percentage      = db.Column(db.Numeric(6, 3), nullable=True)
+    tax_amount          = db.Column(db.Numeric(14, 2), nullable=True)
+    tax_type            = db.Column(db.String(40), nullable=True)
+    is_inclusive_tax    = db.Column(db.Boolean, default=False)
+    # meta
+    reference           = db.Column(db.String(100), nullable=True)
+    entry_number        = db.Column(db.String(40), nullable=True)
+    currency            = db.Column(db.String(10), nullable=True, default="NGN")
+    exchange_rate       = db.Column(db.Numeric(12, 4), nullable=True, default=1)
+    is_billable         = db.Column(db.Boolean, default=False)
+    is_reimbursable     = db.Column(db.Boolean, default=False)
+    customer_name       = db.Column(db.String(200), nullable=True)
+    recurrence_name     = db.Column(db.String(120), nullable=True)
+    expense_report_name = db.Column(db.String(120), nullable=True)
+    expense_reference_id= db.Column(db.String(60), nullable=True)   # Zoho unique id for import upsert
+    claimant_email      = db.Column(db.String(150), nullable=True)
+    # tags / custom fields
+    tag_case_type       = db.Column(db.String(60), nullable=True)
+    tag_client_category = db.Column(db.String(120), nullable=True)
+    cf_unit             = db.Column(db.String(120), nullable=True)
+    # audit
+    created_by          = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by          = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at          = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                                    onupdate=lambda: datetime.now(timezone.utc))
+
+    account  = db.relationship("ImprestAccount", back_populates="expenses")
+    category = db.relationship("Category")
+    branch   = db.relationship("Branch")
+    creator  = db.relationship("User", foreign_keys=[created_by])
+
+
+class ImprestActivityLog(db.Model):
+    """Who-did-what trail for imprest accounts (expense add/edit/delete, top-up disbursed)."""
+    __tablename__ = "imprest_activity_log"
+    id         = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("imprest_accounts.id", ondelete="CASCADE"), nullable=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action     = db.Column(db.String(40), nullable=False)   # expense_added | expense_edited | expense_deleted | topup_disbursed | account_edited
+    amount     = db.Column(db.Numeric(14, 2), nullable=True)
+    detail     = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    account = db.relationship("ImprestAccount")
+    user    = db.relationship("User")
