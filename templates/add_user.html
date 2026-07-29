@@ -46,6 +46,8 @@
         <select name="role" class="inp" id="role-select" onchange="toggleBranchSection()">
           <option value="accountant">Accountant</option>
           <option value="lab_staff">Lab Staff</option>
+          <option value="branch_manager">Branch Manager</option>
+          <option value="cashier">Cashier</option>
           {% if current_user.is_mds %}
           <option value="mds">MDS</option>
           {% endif %}
