@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}{{ acc.name }}{% endblock %}
+{% block page_title %}Imprest — {{ acc.name }}{% endblock %}
+{% block content %}
+
+<div style="margin-bottom:20px;">
+  <a href="{{ url_for('imprest.accounts') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Accounts</a>
+  <h1 class="section-title" style="margin-top:4px;">{{ acc.name }}</h1>
+  <div style="color:var(--muted); font-size:13px;">{{ acc.branch.name if acc.branch else 'No branch' }}{% if acc.account_code %} · {{ acc.account_code }}{% endif %}</div>
+</div>
+
+{# Balance summary #}
+{% set fl = acc.float_amount | float %}
+{% set pct = acc.pct_remaining if acc.pct_remaining is not none else 0 %}
+{% set clamped = 0 if pct < 0 else (100 if pct > 100 else pct) %}
+<div class="card" style="padding:24px; margin-bottom:20px;">
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:16px; margin-bottom:16px;">
+    <div><div style="color:var(--muted); font-size:12px;">Balance</div><div style="font-size:24px; font-weight:800; color:{{ 'var(--red)' if acc.is_low else 'var(--white)' }};">₦{{ '{:,.0f}'.format(acc.balance) }}</div></div>
+    <div><div style="color:var(--muted); font-size:12px;">Released (disbursed)</div><div style="font-size:18px; font-weight:700; color:var(--white);">₦{{ '{:,.0f}'.format(acc.total_released) }}</div></div>
+    <div><div style="color:var(--muted); font-size:12px;">Spent</div><div style="font-size:18px; font-weight:700; color:var(--white);">₦{{ '{:,.0f}'.format(acc.total_spent) }}</div></div>
+    <div><div style="color:var(--muted); font-size:12px;">Float</div><div style="font-size:18px; font-weight:700; color:var(--muted);">{% if fl > 0 %}₦{{ '{:,.0f}'.format(fl) }}{% else %}not set{% endif %}</div></div>
+  </div>
+  {% if fl > 0 %}
+  <div style="height:10px; border-radius:999px; background:var(--bg2); overflow:hidden; border:1px solid var(--border);">
+    <div style="height:100%; width:{{ clamped }}%; background:{{ 'var(--red)' if acc.is_low else 'var(--green)' }};"></div>
+  </div>
+  <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:var(--muted);">
+    <span>{{ pct }}% remaining</span><span>Alerts at ≤ {{ acc.low_threshold_pct | float | round(0) | int }}%</span>
+  </div>
+  {% endif %}
+  <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+    {% if can_topup %}<button onclick="document.getElementById('topupModal').style.display='flex'" class="btn-outline">Request Top-Up</button>{% endif %}
+    <button onclick="document.getElementById('expModal').style.display='flex'" class="btn-primary">+ Add Expense</button>
+    {% if can_admin %}<button onclick="document.getElementById('editModal').style.display='flex'" class="btn-outline">Edit Account</button>{% endif %}
+  </div>
+</div>
+
+{# Expenses #}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Expenses <span style="color:var(--muted); font-size:12px; font-weight:400;">({{ expenses|length }})</span></div>
+  <table>
+    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right;">Amount</th><th>By</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+      {% for e in expenses %}
+      <tr>
+        <td style="color:var(--muted); font-size:12px;">{{ e.date.strftime('%d %b %Y') if e.date else '' }}</td>
+        <td>{{ e.description or '—' }}</td>
+        <td style="color:var(--muted);">{{ e.category.name if e.category else '—' }}</td>
+        <td style="text-align:right; font-weight:600; color:var(--white);">₦{{ '{:,.0f}'.format(e.amount | float) }}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ e.creator.name if e.creator else '—' }}</td>
+        {% if can_edit %}
+        <td><form method="post" action="{{ url_for('imprest.delete_expense', expense_id=e.id) }}" style="margin:0;" onsubmit="return confirm('Delete this expense?');"><button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;">Delete</button></form></td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ 6 if can_edit else 5 }}" style="text-align:center; color:var(--muted); padding:24px;">No expenses yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Funding history #}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Funding (Top-Up Payments)</div>
+  <table>
+    <thead><tr><th>Ref</th><th>Date</th><th style="text-align:right;">Amount</th><th>Approval</th><th>Disbursed</th></tr></thead>
+    <tbody>
+      {% for p in funding %}
+      <tr>
+        <td style="font-weight:600; color:var(--white);">{{ p.reference }}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ p.date.strftime('%d %b %Y') if p.date else '' }}</td>
+        <td style="text-align:right;">₦{{ '{:,.0f}'.format((p.approved_amount or p.requested_amount) | float) }}</td>
+        <td><span class="badge badge-{{ p.status_color }}">{{ p.status }}</span></td>
+        <td>{% if p.upload_status == 'uploaded' %}<span class="badge badge-green">disbursed</span>{% else %}<span class="badge badge-gray">pending</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center; color:var(--muted); padding:22px;">No top-ups yet. Use “Request Top-Up”.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Activity log #}
+<div class="card" style="padding:22px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Activity Log</div>
+  {% if activity %}
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>By</th><th style="text-align:right;">Amount</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for a in activity %}
+      <tr>
+        <td style="color:var(--muted); font-size:12px;">{{ a.created_at.strftime('%d %b %H:%M') if a.created_at else '' }}</td>
+        <td><span class="badge badge-blue">{{ a.action | replace('_',' ') }}</span></td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.user.name if a.user else '—' }}</td>
+        <td style="text-align:right; color:var(--muted);">{% if a.amount %}₦{{ '{:,.0f}'.format(a.amount | float) }}{% else %}—{% endif %}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div style="text-align:center; color:var(--muted); padding:20px;">No activity yet.</div>{% endif %}
+</div>
+
+{# Add Expense modal #}
+<div id="expModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:480px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Add Expense</div>
+      <button onclick="document.getElementById('expModal').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('imprest.add_expense') }}">
+      <input type="hidden" name="account_id" value="{{ acc.id }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div><label class="label">Date *</label><input name="date" type="date" class="inp" required value="{{ today }}"></div>
+          <div><label class="label">Amount (₦) *</label><input name="amount" type="number" step="0.01" class="inp" required></div>
+        </div>
+        <div><label class="label">Description</label><input name="description" class="inp" placeholder="e.g. Local transport to Mushin"></div>
+        <div><label class="label">Expense Account</label>
+          <select name="category_id" class="inp"><option value="">—</option>{% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+        </div>
+        <div><label class="label">Vendor</label><input name="vendor" class="inp" placeholder="optional"></div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Save Expense</button>
+        <button type="button" onclick="document.getElementById('expModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Top-Up modal #}
+{% if can_topup %}
+<div id="topupModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:430px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Request Top-Up</div>
+      <button onclick="document.getElementById('topupModal').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;">×</button>
+    </div>
+    <div style="color:var(--muted); font-size:12px; margin-bottom:14px;">Raises a payment request to fund this float. It credits the balance once MDS approves and it's marked disbursed.</div>
+    <form method="post" action="{{ url_for('imprest.request_topup', account_id=acc.id) }}">
+      <label class="label">Amount (₦) *</label>
+      <input name="amount" type="number" step="0.01" class="inp" required placeholder="e.g. 100000" style="margin-bottom:16px;">
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn-primary">Raise Request</button>
+        <button type="button" onclick="document.getElementById('topupModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{# Edit Account modal #}
+{% if can_admin %}
+<div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(4,17,40,.7); z-index:2000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div class="card" style="width:460px; max-width:95vw; padding:28px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div style="font-size:16px; font-weight:800; color:var(--white);">Edit Account</div>
+      <button onclick="document.getElementById('editModal').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;">×</button>
+    </div>
+    <form method="post" action="{{ url_for('imprest.edit_account', account_id=acc.id) }}">
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div><label class="label">Account Name</label><input name="name" class="inp" value="{{ acc.name }}"></div>
+        <div><label class="label">Branch</label>
+          <select name="branch_id" class="inp"><option value="">—</option>{% for b in branches %}<option value="{{ b.id }}" {% if acc.branch_id == b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}</select>
+        </div>
+        <div><label class="label">Account Code</label><input name="account_code" class="inp" value="{{ acc.account_code or '' }}"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div><label class="label">Float Amount (₦)</label><input name="float_amount" type="number" step="0.01" class="inp" value="{{ acc.float_amount | float }}"></div>
+          <div><label class="label">Low Threshold (%)</label><input name="low_threshold_pct" type="number" step="0.01" class="inp" value="{{ acc.low_threshold_pct | float }}"></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button type="submit" class="btn-primary">Save</button>
+        <button type="button" onclick="document.getElementById('editModal').style.display='none'" class="btn-outline">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
