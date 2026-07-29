@@ -113,7 +113,7 @@ def add_user():
 
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     user = User(name=name, email=email, password_hash=pw_hash, role=role)
-    if role in ("accountant", "lab_staff") and branch_ids:
+    if role in ("accountant", "lab_staff", "branch_manager", "cashier") and branch_ids:
         user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all()
     db.session.add(user)
     db.session.commit()
@@ -143,7 +143,7 @@ def edit_user(user_id):
     user.name = name
     user.email = email
     user.role = role
-    if role in ("accountant", "lab_staff"):
+    if role in ("accountant", "lab_staff", "branch_manager", "cashier"):
         user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all() if branch_ids else []
     else:
         user.branches = []
@@ -225,7 +225,7 @@ def submit_user():
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     user = User(name=name, email=email, password_hash=pw_hash, role=role,
                 is_active=starts_active)
-    if role in ("accountant", "lab_staff") and branch_ids:
+    if role in ("accountant", "lab_staff", "branch_manager", "cashier") and branch_ids:
         user.branches = Branch.query.filter(Branch.id.in_(branch_ids)).all()
     db.session.add(user)
     db.session.commit()
