@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Imprest &amp; Expenses{% endblock %}
+{% block page_title %}Imprest &amp; Expenses{% endblock %}
+{% block content %}
+
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <h1 class="section-title">Imprest Dashboard</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:4px;">Branch floats — funded via payments, drawn down by expenses</div>
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="{{ url_for('imprest.accounts') }}" class="btn-outline">Accounts</a>
+    <a href="{{ url_for('imprest.expenses') }}" class="btn-primary">Expenses</a>
+    <a href="{{ url_for('imprest.guide') }}" class="btn-outline">How to Use</a>
+  </div>
+</div>
+
+{# Quick nav #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px;">
+  {% for label, url in [('Accounts', url_for('imprest.accounts')), ('All Expenses', url_for('imprest.expenses')), ('Export CSV', url_for('imprest.export_expenses'))] %}
+  <a href="{{ url }}" class="card" style="padding:15px; text-decoration:none; display:flex; align-items:center; gap:10px; color:var(--white); font-size:13px; font-weight:600;">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{# KPIs #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:28px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Imprest Accounts</div>
+    <div class="kpi-value">{{ accounts|length }}</div>
+    <div class="kpi-sub"><a href="{{ url_for('imprest.accounts') }}" style="color:var(--orange2);">Manage →</a></div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Low Balance</div>
+    <div class="kpi-value" style="color:{{ 'var(--red)' if low else 'var(--green)' }};">{{ low|length }}</div>
+    <div class="kpi-sub">At or below threshold</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Balance</div>
+    <div class="kpi-value">₦{{ '{:,.0f}'.format(total_balance) }}</div>
+    <div class="kpi-sub">Across your accounts</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Spent This Month</div>
+    <div class="kpi-value">₦{{ '{:,.0f}'.format(spent_month) }}</div>
+    <div class="kpi-sub">Released: ₦{{ '{:,.0f}'.format(total_released) }}</div>
+  </div>
+</div>
+
+{# Low-balance alert #}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Low-Balance Alerts</div>
+  {% if low %}
+  <table>
+    <thead><tr><th>Account</th><th>Branch</th><th style="text-align:right;">Balance</th><th style="text-align:right;">Float</th><th style="text-align:right;">Remaining</th></tr></thead>
+    <tbody>
+      {% for a in low %}
+      <tr>
+        <td><a href="{{ url_for('imprest.account_detail', account_id=a.id) }}" style="color:var(--orange2); font-weight:600;">{{ a.name }}</a></td>
+        <td style="color:var(--muted);">{{ a.branch.name if a.branch else '—' }}</td>
+        <td style="text-align:right; font-weight:700; color:var(--red);">₦{{ '{:,.0f}'.format(a.balance) }}</td>
+        <td style="text-align:right; color:var(--muted);">₦{{ '{:,.0f}'.format(a.float_amount | float) }}</td>
+        <td style="text-align:right;"><span class="badge badge-red">{{ a.pct_remaining if a.pct_remaining is not none else 0 }}%</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center; padding:26px 0; color:var(--muted);">All accounts are above their threshold. ✅</div>
+  {% endif %}
+</div>
+
+{# Accounts overview #}
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Accounts</div>
+  <table>
+    <thead><tr><th>Account</th><th>Branch</th><th style="text-align:right;">Released</th><th style="text-align:right;">Spent</th><th style="text-align:right;">Balance</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for a in accounts %}
+      <tr>
+        <td><a href="{{ url_for('imprest.account_detail', account_id=a.id) }}" style="color:var(--orange2); font-weight:600;">{{ a.name }}</a></td>
+        <td style="color:var(--muted);">{{ a.branch.name if a.branch else '—' }}</td>
+        <td style="text-align:right; color:var(--muted);">₦{{ '{:,.0f}'.format(a.total_released) }}</td>
+        <td style="text-align:right; color:var(--muted);">₦{{ '{:,.0f}'.format(a.total_spent) }}</td>
+        <td style="text-align:right; font-weight:700; color:var(--white);">₦{{ '{:,.0f}'.format(a.balance) }}</td>
+        <td>{% if a.is_low %}<span class="badge badge-red">Low</span>{% elif a.float_amount and a.float_amount|float > 0 %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-gray">No float set</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center; color:var(--muted); padding:26px;">No imprest accounts yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Recent activity #}
+<div class="card" style="padding:22px;">
+  <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Recent Activity</div>
+  {% if recent_activity %}
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>By</th><th style="text-align:right;">Amount</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for a in recent_activity %}
+      <tr>
+        <td style="color:var(--muted); font-size:12px;">{{ a.created_at.strftime('%d %b %H:%M') if a.created_at else '' }}</td>
+        <td><span class="badge badge-blue">{{ a.action | replace('_',' ') }}</span></td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.user.name if a.user else '—' }}</td>
+        <td style="text-align:right; color:var(--muted);">{% if a.amount %}₦{{ '{:,.0f}'.format(a.amount | float) }}{% else %}—{% endif %}</td>
+        <td style="color:var(--muted); font-size:12px;">{{ a.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center; padding:22px 0; color:var(--muted);">No activity yet.</div>
+  {% endif %}
+</div>
+
+{% endblock %}
