@@ -102,6 +102,8 @@
           <select name="role" class="inp" onchange="toggleAddBranches(this.value)">
             <option value="accountant">Accountant</option>
             <option value="lab_staff">Lab Staff</option>
+            <option value="branch_manager">Branch Manager</option>
+            <option value="cashier">Cashier</option>
             <option value="mds">MDS</option>
           </select>
         </div>
@@ -181,6 +183,8 @@
                     <select name="role" class="inp" onchange="toggleEditBranches(this, {{ u.id }})">
                       <option value="accountant" {% if u.role == 'accountant' %}selected{% endif %}>Accountant</option>
                       <option value="lab_staff" {% if u.role == 'lab_staff' %}selected{% endif %}>Lab Staff</option>
+                      <option value="branch_manager" {% if u.role == 'branch_manager' %}selected{% endif %}>Branch Manager</option>
+                      <option value="cashier" {% if u.role == 'cashier' %}selected{% endif %}>Cashier</option>
                       <option value="mds" {% if u.is_mds %}selected{% endif %}>MDS</option>
                     </select>
                   </div>
