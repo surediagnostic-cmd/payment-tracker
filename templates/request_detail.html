@@ -218,6 +218,24 @@
     </form>
     {% endif %}
   </div>
+
+  {% if imprest_accounts and (current_user.is_mds or current_user.role in ['accountant','branch_manager']) %}
+  <div class="card" style="padding:20px; margin-top:16px;">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--orange); font-weight:700; margin-bottom:10px;">Imprest Float Funding</div>
+    <div style="color:var(--muted); font-size:12px; margin-bottom:12px;">
+      {% if pr.imprest_account %}This payment funds <b style="color:var(--white);">{{ pr.imprest_account.name }}</b>{% if pr.status == 'approved' and pr.upload_status == 'uploaded' %} — <span style="color:var(--green);">credited to the float</span>.{% else %} — credits the float once it is approved &amp; uploaded.{% endif %}{% else %}Link this payment to an imprest float so it credits the balance when disbursed.{% endif %}
+    </div>
+    <form method="POST" action="{{ url_for('requests.set_imprest_link', req_id=pr.id) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0;">
+      <select name="imprest_account_id" class="inp" style="max-width:340px;">
+        <option value="">— Not a float top-up —</option>
+        {% for acc in imprest_accounts %}
+        <option value="{{ acc.id }}" {% if pr.imprest_account_id == acc.id %}selected{% endif %}>{{ acc.name }}{% if acc.branch %} — {{ acc.branch.name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn-primary" style="font-size:12px; padding:8px 16px;">Save</button>
+    </form>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
