@@ -86,6 +86,18 @@ def create_app():
     def health():
         return "ok", 200
 
+    @app.before_request
+    def _imprest_only_guard():
+        # Cashiers are limited to the Imprest & Expenses module for now.
+        from flask_login import current_user
+        from flask import request
+        if not current_user.is_authenticated or not getattr(current_user, "is_cashier", False):
+            return
+        ep = request.endpoint or ""
+        if ep.startswith("imprest") or ep.startswith("auth") or ep in ("root", "health", "static"):
+            return
+        return redirect(url_for("imprest.dashboard"))
+
     @app.errorhandler(500)
     def internal_error(error):
         import traceback
