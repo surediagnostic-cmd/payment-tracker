@@ -152,8 +152,13 @@ def new_period():
             start_raw = request.form.get("period_start", "").strip()
             end_raw   = request.form.get("period_end", "").strip()
 
+            period_type = request.form.get("period_type", "weekly").strip() or "weekly"
+            if period_type not in ("weekly", "biweekly", "monthly", "custom"):
+                period_type = "custom"
+
             period = RevenueSharePeriod(
                 label         = label,
+                period_type   = period_type,
                 branch_id     = int(branch_id_raw) if branch_id_raw else None,
                 gross_revenue = gross,
                 period_start  = datetime.strptime(start_raw, "%Y-%m-%d").date() if start_raw else None,
