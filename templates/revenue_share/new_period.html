@@ -9,7 +9,7 @@
 </div>
 
 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
-  <h1 style="margin:0; font-size:1.35rem; font-weight:700;">New Weekly Run</h1>
+  <h1 style="margin:0; font-size:1.35rem; font-weight:700;">New Revenue Share Run</h1>
   <a href="{{ url_for('revenue_share.templates_page') }}"
      style="font-size:.8rem; color:var(--muted); text-decoration:none; border:1px solid var(--border);
             border-radius:7px; padding:5px 12px;">
@@ -23,6 +23,16 @@
   <div class="kpi-card" style="padding:20px; margin-bottom:16px;">
     <h3 style="margin:0 0 14px; font-size:.95rem; font-weight:600;">Period Details</h3>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+
+      <div>
+        <label class="label">Period Type</label>
+        <select name="period_type" id="period-type" class="inp" style="width:100%;" onchange="onTypeChange()">
+          <option value="weekly">Weekly (Mon–Sun)</option>
+          <option value="biweekly">Bi-weekly (14 days)</option>
+          <option value="monthly">Monthly</option>
+          <option value="custom">Custom dates</option>
+        </select>
+      </div>
 
       <div>
         <label class="label">Branch</label>
@@ -59,23 +69,15 @@
                value="{{ request.form.get('period_end', '') }}" onchange="updateLabel()">
       </div>
 
-      {# Week quick-fill buttons #}
-      <div style="grid-column:1/-1; display:flex; gap:8px; flex-wrap:wrap;">
-        <button type="button" onclick="fillWeek(0)"
+      {# Quick-fill (adapts to the selected period type) #}
+      <div id="quickfill" style="grid-column:1/-1; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button type="button" id="qf-this" onclick="fillPeriod(0)"
                 style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
-                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
-          This Week (Mon–Sun)
-        </button>
-        <button type="button" onclick="fillWeek(-1)"
+                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">This week</button>
+        <button type="button" id="qf-last" onclick="fillPeriod(-1)"
                 style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
-                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
-          Last Week
-        </button>
-        <button type="button" onclick="fillWeek(-2)"
-                style="font-size:.8rem; padding:5px 14px; border:1px solid var(--border);
-                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">
-          2 Weeks Ago
-        </button>
+                       border-radius:7px; background:var(--card); color:var(--text); cursor:pointer;">Last week</button>
+        <span id="qf-hint" style="font-size:.78rem; color:var(--muted);"></span>
       </div>
 
       <div style="grid-column:1/-1;">
@@ -296,17 +298,50 @@ function setSource(src) {
   recalcAmounts();
 }
 
-// ── Week quick-fill ─────────────────────────────────────────────────────────
-function fillWeek(offset) {
+// ── Period type + quick-fill ────────────────────────────────────────────────
+function ptype() { return document.getElementById('period-type').value; }
+const fmtD = d => d.toISOString().slice(0, 10);
+
+function onTypeChange() {
+  const t = ptype();
+  const qf = document.getElementById('quickfill');
+  const names = {
+    weekly:   ['This week', 'Last week', 'Mon–Sun'],
+    biweekly: ['This fortnight', 'Last fortnight', '14-day span'],
+    monthly:  ['This month', 'Last month', '1st – last of the month'],
+    custom:   ['', '', 'Pick any start & end dates'],
+  };
+  const n = names[t] || names.weekly;
+  if (t === 'custom') {
+    qf.style.display = 'none';
+  } else {
+    qf.style.display = 'flex';
+    document.getElementById('qf-this').textContent = n[0];
+    document.getElementById('qf-last').textContent = n[1];
+  }
+  document.getElementById('qf-hint').textContent = n[2];
+  updateLabel();
+}
+
+function fillPeriod(offset) {
+  const t = ptype();
   const today = new Date();
-  const day   = today.getDay(); // 0=Sun … 6=Sat
-  const mon   = new Date(today);
-  mon.setDate(today.getDate() - ((day === 0 ? 7 : day) - 1) + offset * 7);
-  const sun = new Date(mon);
-  sun.setDate(mon.getDate() + 6);
-  const fmt = d => d.toISOString().slice(0, 10);
-  document.getElementById('start-inp').value = fmt(mon);
-  document.getElementById('end-inp').value   = fmt(sun);
+  let start, end;
+  if (t === 'monthly') {
+    const m = today.getMonth() + offset;
+    start = new Date(today.getFullYear(), m, 1);
+    end   = new Date(today.getFullYear(), m + 1, 0);
+  } else {
+    const span = (t === 'biweekly') ? 14 : 7;
+    const day  = today.getDay(); // 0=Sun … 6=Sat
+    const mon  = new Date(today);
+    mon.setDate(today.getDate() - ((day === 0 ? 7 : day) - 1) + offset * span);
+    start = mon;
+    end   = new Date(mon);
+    end.setDate(mon.getDate() + span - 1);
+  }
+  document.getElementById('start-inp').value = fmtD(start);
+  document.getElementById('end-inp').value   = fmtD(end);
   updateLabel();
 }
 
@@ -315,24 +350,27 @@ function updateLabel() {
   const e  = document.getElementById('end-inp').value;
   const br = document.getElementById('branch-sel');
   const brName = br.options[br.selectedIndex]?.text || '';
-  if (!s) return;
-  const d   = new Date(s + 'T00:00:00');
-  const wn  = getWeekNum(d);
-  const mon = d.toLocaleString('en-GB', {month:'short'});
-  const yr  = d.getFullYear();
-  const label = document.getElementById('period-label');
-  if (!label.dataset.userEdited) {
-    label.value = [
-      `Week ${wn} – ${mon} ${yr}`,
-      brName && brName !== '— All / General —' ? brName : ''
-    ].filter(Boolean).join(' · ');
-  }
+  const label  = document.getElementById('period-label');
+  if (!s || label.dataset.userEdited) return;
+  const t   = ptype();
+  const ds  = new Date(s + 'T00:00:00');
+  const de  = e ? new Date(e + 'T00:00:00') : ds;
+  const moS = ds.toLocaleString('en-GB', {month:'short'});
+  const moE = de.toLocaleString('en-GB', {month:'short'});
+  const yr  = ds.getFullYear();
+  let core;
+  if (t === 'weekly')       core = `Week ${getWeekNum(ds)} – ${moS} ${yr}`;
+  else if (t === 'monthly') core = `${moS} ${yr}`;
+  else                      core = `${ds.getDate()} ${moS} – ${de.getDate()} ${moE} ${yr}`;
+  label.value = [core, (brName && brName !== '— All / General —') ? brName : ''].filter(Boolean).join(' · ');
 }
 
 function getWeekNum(d) {
   const start = new Date(d.getFullYear(), 0, 1);
   return Math.ceil(((d - start) / 86400000 + start.getDay() + 1) / 7);
 }
+
+document.addEventListener('DOMContentLoaded', onTypeChange);
 
 document.getElementById('period-label').addEventListener('input', function() {
   this.dataset.userEdited = this.value ? '1' : '';
