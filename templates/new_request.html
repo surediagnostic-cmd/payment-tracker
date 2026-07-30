@@ -39,12 +39,13 @@
       {% if imprest_accounts %}
       <div style="margin-top:18px;">
         <label class="label">Fund an imprest float? <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional — credits the float once this payment is approved &amp; uploaded)</span></label>
-        <select name="imprest_account_id" class="inp">
+        <select name="imprest_account_id" id="imprestSelect" class="inp">
           <option value="">— No, a normal payment —</option>
           {% for acc in imprest_accounts %}
-          <option value="{{ acc.id }}" {% if edit_mode and pr.imprest_account_id == acc.id %}selected{% endif %}>{{ acc.name }}{% if acc.branch %} — {{ acc.branch.name }}{% endif %}</option>
+          <option value="{{ acc.id }}" data-branch="{{ acc.branch_id or '' }}" {% if edit_mode and pr.imprest_account_id == acc.id %}selected{% endif %}>{{ acc.name }}{% if acc.branch %} — {{ acc.branch.name }}{% endif %}</option>
           {% endfor %}
         </select>
+        <div id="floatAutoHint" style="font-size:11px; color:var(--green); margin-top:5px; display:none;">Auto-selected from the branch &amp; “Imprest / Float” category.</div>
       </div>
       {% endif %}
     </div>
@@ -676,6 +677,45 @@ function loadExistingItems(items) {
 {% if edit_mode and existing_items_json %}
 loadExistingItems({{ existing_items_json | safe }});
 {% endif %}
+
+// ── Auto-pick imprest float from branch + "Imprest / Float" category ──────────
+function _floatCategoryChosen() {
+  return Array.from(document.querySelectorAll('#itemsContainer [data-field="category_id"]')).some(function(sel){
+    var opt = sel.options[sel.selectedIndex];
+    return opt && /imprest|float/i.test(opt.textContent || '');
+  });
+}
+function _currentBranchId() {
+  var el = document.querySelector('[name="branch_id"]');
+  return el ? el.value : '';
+}
+function autoPickFloat() {
+  var imp = document.getElementById('imprestSelect');
+  if (!imp) return;
+  var hint = document.getElementById('floatAutoHint');
+  if (imp.dataset.userset === '1') { if (hint) hint.style.display = 'none'; return; }
+  var branch = _currentBranchId();
+  var picked = false;
+  if (_floatCategoryChosen() && branch) {
+    var match = Array.from(imp.options).find(function(o){ return o.dataset.branch === String(branch); });
+    if (match) { imp.value = match.value; picked = true; }
+  } else if (imp.dataset.auto === '1') {
+    imp.value = '';
+  }
+  imp.dataset.auto = imp.value ? '1' : '';
+  if (hint) hint.style.display = (picked ? 'block' : 'none');
+}
+(function(){
+  var imp = document.getElementById('imprestSelect');
+  if (imp) imp.addEventListener('change', function(){ imp.dataset.userset = '1'; });
+  var br = document.querySelector('[name="branch_id"]');
+  if (br && br.tagName === 'SELECT') br.addEventListener('change', autoPickFloat);
+  var cont = document.getElementById('itemsContainer');
+  if (cont) cont.addEventListener('change', function(e){
+    if (e.target && e.target.matches && e.target.matches('[data-field="category_id"]')) autoPickFloat();
+  });
+  autoPickFloat();
+})();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 updateRemoveButtons();
