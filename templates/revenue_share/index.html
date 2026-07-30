@@ -15,7 +15,7 @@
       Manage Recipients
     </a>
     <a href="{{ url_for('revenue_share.new_period') }}" class="btn-primary" style="text-decoration:none;">
-      + New Weekly Run
+      + New Run
     </a>
   </div>
 </div>
@@ -111,7 +111,10 @@
         {% set total_pct = p.total_allocated_pct %}
         {% set total_amt = p.total_allocated_amount %}
         <tr style="border-top:1px solid var(--border);">
-          <td style="padding:12px 16px; font-weight:500;">{{ p.label }}</td>
+          <td style="padding:12px 16px; font-weight:500;">
+            {{ p.label }}
+            {% if p.period_type %}<span class="badge" style="margin-left:6px; background:rgba(122,156,196,.15); color:var(--muted); font-size:.7rem; text-transform:capitalize;">{{ p.period_type }}</span>{% endif %}
+          </td>
           <td style="padding:12px 16px; color:var(--muted);">{{ p.branch.name if p.branch else '—' }}</td>
           <td style="padding:12px 12px; text-align:right;">₦{{ "{:,.0f}".format(p.gross_revenue or 0) }}</td>
           <td style="padding:12px 12px; text-align:right;">
