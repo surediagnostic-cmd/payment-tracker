@@ -167,19 +167,19 @@
     </div>
   </div>
 
-  {% if not current_user.is_lab_staff %}
+  {% if not current_user.is_lab_staff and not current_user.is_cashier %}
   <a href="{{ url_for('requests.dashboard') }}" class="nav-link {% if request.endpoint == 'requests.dashboard' %}active{% endif %}" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
     Dashboard
   </a>
   {% endif %}
-  {% if not current_user.is_mds and not current_user.is_lab_staff %}
+  {% if not current_user.is_mds and not current_user.is_lab_staff and not current_user.is_cashier %}
   <a href="{{ url_for('requests.new_request') }}" class="nav-link {% if request.endpoint == 'requests.new_request' %}active{% endif %}" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
     New Request
   </a>
   {% endif %}
-  {% if not current_user.is_lab_staff %}
+  {% if not current_user.is_lab_staff and not current_user.is_cashier %}
   <a href="{{ url_for('requests.list_requests') }}" class="nav-link {% if request.endpoint == 'requests.list_requests' %}active{% endif %}" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r=".5" fill="currentColor"/><circle cx="3.5" cy="12" r=".5" fill="currentColor"/><circle cx="3.5" cy="18" r=".5" fill="currentColor"/></svg>
     All Payments
@@ -201,13 +201,13 @@
     Imprest &amp; Expenses
   </a>
   {% endif %}
-  {% if not current_user.is_lab_staff %}
+  {% if not current_user.is_lab_staff and not current_user.is_cashier %}
   <a href="{{ url_for('reports.export') }}" class="nav-link" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     Export Excel
   </a>
   {% endif %}
-  {% if not current_user.is_mds and not current_user.is_lab_staff %}
+  {% if not current_user.is_mds and not current_user.is_lab_staff and not current_user.is_cashier %}
   <a href="{{ url_for('requests.download_template') }}" class="nav-link" onclick="closeSidebar()">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
     Download Template
