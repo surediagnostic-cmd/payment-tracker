@@ -601,6 +601,7 @@ class RevenueSharePeriod(db.Model):
     __tablename__ = "revenue_share_periods"
     id            = db.Column(db.Integer, primary_key=True)
     label         = db.Column(db.String(100), nullable=False)
+    period_type   = db.Column(db.String(12), nullable=True, default='weekly')  # weekly | biweekly | monthly | custom
     branch_id     = db.Column(db.Integer, db.ForeignKey('branches.id', ondelete='SET NULL'), nullable=True)
     gross_revenue = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     period_start  = db.Column(db.Date, nullable=True)
