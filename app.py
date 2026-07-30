@@ -525,6 +525,20 @@ def _run_migrations():
                 db.session.rollback()
                 print(f"[migration] payment_requests imprest_account_id: {e}")
 
+    # 19. period_type column on revenue_share_periods (weekly/biweekly/monthly/custom)
+    if 'revenue_share_periods' in tables:
+        rsp_cols = {col['name'] for col in insp.get_columns('revenue_share_periods')}
+        if 'period_type' not in rsp_cols:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE revenue_share_periods ADD COLUMN period_type VARCHAR(12) DEFAULT 'weekly'"
+                ))
+                db.session.commit()
+                print("[migration] added period_type to revenue_share_periods")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[migration] revenue_share_periods period_type: {e}")
+
 
 def _seed_defaults():
     from models import Branch, Category, User
