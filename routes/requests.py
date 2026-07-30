@@ -6,7 +6,8 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 from sqlalchemy.orm import subqueryload, joinedload
 from app import db
-from models import PaymentRequest, PaymentRequestItem, Branch, Category, User, InventoryItem
+from models import (PaymentRequest, PaymentRequestItem, Branch, Category, User, InventoryItem,
+                    ImprestAccount, ImprestActivityLog)
 from utils import send_email
 
 requests_bp = Blueprint("requests", __name__)
@@ -272,6 +273,7 @@ def new_request():
 
     categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
     inventory_items = InventoryItem.query.filter_by(is_active=True).order_by(InventoryItem.name).all()
+    imprest_accounts = ImprestAccount.query.filter_by(is_active=True).order_by(ImprestAccount.name).all()
     user_branch_list = current_user.branches
 
     if not user_branch_list:
@@ -315,6 +317,8 @@ def new_request():
                     except Exception:
                         pass
 
+            imp_id = request.form.get("imprest_account_id", "").strip()
+
             ref = PaymentRequest.generate_reference(branch_id)
             pr = PaymentRequest(
                 reference=ref,
@@ -326,6 +330,7 @@ def new_request():
                 bank_code=request.form.get("bank_code", "").strip(),
                 requested_amount=total,
                 submitted_by=current_user.id,
+                imprest_account_id=int(imp_id) if imp_id else None,
             )
             db.session.add(pr)
             db.session.flush()
@@ -420,7 +425,8 @@ def new_request():
             flash(f"Error submitting request: {str(e)}", "error")
 
     return render_template("new_request.html", categories=categories,
-                           user_branches=user_branch_list, inventory_items=inventory_items)
+                           user_branches=user_branch_list, inventory_items=inventory_items,
+                           imprest_accounts=imprest_accounts)
 
 
 @requests_bp.route("/requests/<int:req_id>")
@@ -430,7 +436,8 @@ def view_request(req_id):
     if not current_user.is_mds and pr.submitted_by != current_user.id:
         flash("Access denied.", "error")
         return redirect(url_for("requests.dashboard"))
-    return render_template("request_detail.html", pr=pr)
+    imprest_accounts = ImprestAccount.query.filter_by(is_active=True).order_by(ImprestAccount.name).all()
+    return render_template("request_detail.html", pr=pr, imprest_accounts=imprest_accounts)
 
 
 @requests_bp.route("/requests/<int:req_id>/upload", methods=["POST"])
@@ -442,8 +449,40 @@ def mark_uploaded(req_id):
         return redirect(url_for("requests.view_request", req_id=req_id))
 
     pr.upload_status = "uploaded"
+    # If this payment funds an imprest float, its balance now reflects the disbursement.
+    if pr.imprest_account_id:
+        db.session.add(ImprestActivityLog(
+            account_id=pr.imprest_account_id, user_id=current_user.id,
+            action="topup_disbursed", amount=pr.approved_amount or pr.requested_amount,
+            detail=f"Payment {pr.reference} disbursed into float",
+        ))
     db.session.commit()
-    flash(f"{pr.reference} marked as uploaded.", "success")
+    if pr.imprest_account_id:
+        flash(f"{pr.reference} marked as uploaded — float credited.", "success")
+    else:
+        flash(f"{pr.reference} marked as uploaded.", "success")
+    return redirect(url_for("requests.view_request", req_id=req_id))
+
+
+@requests_bp.route("/requests/<int:req_id>/imprest-link", methods=["POST"])
+@login_required
+def set_imprest_link(req_id):
+    """Tag (or untag) a payment as funding an imprest float. Lets already-created
+    payments credit a float once they are approved + uploaded."""
+    if not (current_user.is_mds or current_user.role in ("accountant", "branch_manager")):
+        flash("Not permitted.", "error")
+        return redirect(url_for("requests.view_request", req_id=req_id))
+    pr = PaymentRequest.query.get_or_404(req_id)
+    imp_id = request.form.get("imprest_account_id", "").strip()
+    pr.imprest_account_id = int(imp_id) if imp_id else None
+    if imp_id and pr.status == "approved" and pr.upload_status == "uploaded":
+        db.session.add(ImprestActivityLog(
+            account_id=int(imp_id), user_id=current_user.id,
+            action="topup_disbursed", amount=pr.approved_amount or pr.requested_amount,
+            detail=f"Payment {pr.reference} linked to float (already disbursed)",
+        ))
+    db.session.commit()
+    flash("Imprest float link updated.", "success")
     return redirect(url_for("requests.view_request", req_id=req_id))
 
 
