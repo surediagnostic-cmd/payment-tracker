@@ -283,6 +283,40 @@ def delete_transaction(txn_id):
     return redirect(request.referrer or url_for("inventory.dashboard"))
 
 
+@inventory_bp.route("/items/<int:item_id>/set-count", methods=["POST"])
+@login_required
+@_stock_manager
+def set_exact_count(item_id):
+    """Set a branch's on-hand quantity to an exact number in one step by recording
+    the adjustment delta (target − current)."""
+    item = InventoryItem.query.get_or_404(item_id)
+    branch_id  = request.form.get("branch_id", type=int)   # None → central
+    target_raw = (request.form.get("target") or "").replace(",", "").strip()
+    if target_raw == "":
+        flash("Enter the exact count.", "error")
+        return redirect(url_for("inventory.item_detail", item_id=item_id))
+    try:
+        target = float(target_raw)
+    except ValueError:
+        flash("Invalid count.", "error")
+        return redirect(url_for("inventory.item_detail", item_id=item_id))
+
+    sl = StockLevel.query.filter(
+        StockLevel.item_id == item_id, StockLevel.branch_id == branch_id).first()
+    current = float(sl.qty_on_hand) if sl else 0.0
+    delta = round(target - current, 4)
+    if delta == 0:
+        flash(f"{item.name} is already at {target:g} — no change.", "info")
+        return redirect(url_for("inventory.item_detail", item_id=item_id))
+
+    _apply_txn(item_id=item_id, branch_id=branch_id, txn_type="adjust",
+               qty=delta, user_id=current_user.id,
+               notes=f"Set to exact count {target:g} (was {current:g})")
+    db.session.commit()
+    flash(f"{item.name} set to {target:g}.", "success")
+    return redirect(url_for("inventory.item_detail", item_id=item_id))
+
+
 # ── Items catalogue ───────────────────────────────────────────────────────────
 
 @inventory_bp.route("/items")
