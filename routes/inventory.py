@@ -262,6 +262,27 @@ def dashboard():
     )
 
 
+@inventory_bp.route("/transactions/<int:txn_id>/delete", methods=["POST"])
+@login_required
+@_mds_only
+def delete_transaction(txn_id):
+    """Delete a stock transaction entered in error and reverse its effect on the
+    branch's on-hand quantity, so the balance self-corrects."""
+    txn = StockTransaction.query.get_or_404(txn_id)
+    item_name = txn.item.name if txn.item else "item"
+    sl = StockLevel.query.filter(
+        StockLevel.item_id == txn.item_id,
+        StockLevel.branch_id == txn.branch_id,
+    ).first()
+    if sl is not None:
+        sl.qty_on_hand = float(sl.qty_on_hand) - float(txn.qty)
+        sl.last_updated = datetime.now(timezone.utc)
+    db.session.delete(txn)
+    db.session.commit()
+    flash(f"Transaction reversed & deleted — {item_name} stock corrected.", "success")
+    return redirect(request.referrer or url_for("inventory.dashboard"))
+
+
 # ── Items catalogue ───────────────────────────────────────────────────────────
 
 @inventory_bp.route("/items")
