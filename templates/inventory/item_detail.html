@@ -99,7 +99,7 @@
   <div style="font-size:14px; font-weight:700; color:var(--white); margin-bottom:14px;">Transaction History (last 30)</div>
   {% if txns %}
   <table>
-    <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Branch</th><th>Ref</th><th>By</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Branch</th><th>Ref</th><th>By</th><th>Notes</th>{% if current_user.is_mds %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for t in txns %}
       <tr>
@@ -117,6 +117,14 @@
         <td style="color:var(--dim); font-size:12px;">{{ t.reference or '—' }}</td>
         <td style="color:var(--muted); font-size:12px;">{{ t.creator.name if t.creator else '—' }}</td>
         <td style="color:var(--dim); font-size:12px;">{{ t.notes or '—' }}</td>
+        {% if current_user.is_mds %}
+        <td style="text-align:right;">
+          <form method="post" action="{{ url_for('inventory.delete_transaction', txn_id=t.id) }}" style="margin:0;"
+                onsubmit="return confirm('Delete this {{ t.txn_type }} of {{ t.qty|float|round(2) }}? The on-hand balance will be reversed.')">
+            <button type="submit" title="Delete & reverse" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:12px; padding:2px 6px;">✕</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
