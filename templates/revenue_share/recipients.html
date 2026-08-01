@@ -49,9 +49,14 @@
           </td>
           <td style="padding:12px 16px; text-align:right; white-space:nowrap;">
             <button class="btn-outline" style="font-size:.8rem; padding:4px 10px; margin-right:6px;"
-                    onclick="openModal({{ rec.id }}, {{ rec.name|tojson }}, {{ (rec.account_name or '')|tojson }},
-                             {{ (rec.account_number or '')|tojson }}, {{ (rec.bank_name or '')|tojson }},
-                             {{ (rec.description or '')|tojson }}, {{ 1 if rec.is_active else 0 }})">
+                    data-id="{{ rec.id }}"
+                    data-name="{{ rec.name }}"
+                    data-acctname="{{ rec.account_name or '' }}"
+                    data-acctnum="{{ rec.account_number or '' }}"
+                    data-bank="{{ rec.bank_name or '' }}"
+                    data-desc="{{ rec.description or '' }}"
+                    data-active="{{ 1 if rec.is_active else 0 }}"
+                    onclick="openModalFromBtn(this)">
               Edit
             </button>
             <button class="btn-danger" style="font-size:.8rem; padding:4px 10px;"
@@ -124,6 +129,11 @@
 </div>
 
 <script>
+function openModalFromBtn(btn) {
+  const d = btn.dataset;
+  openModal(d.id, d.name, d.acctname, d.acctnum, d.bank, d.desc, parseInt(d.active, 10));
+}
+
 function openModal(id, name, acctName, acctNum, bank, desc, active) {
   document.getElementById('m-id').value           = id  || '';
   document.getElementById('m-name').value         = name     || '';
