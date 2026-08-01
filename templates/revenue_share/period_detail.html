@@ -39,6 +39,12 @@
       ← Revert to Draft
     </button>
     {% endif %}
+    {% if not period.payouts_executed %}
+    <form method="post" action="{{ url_for('revenue_share.delete_period', period_id=period.id) }}" style="margin:0;"
+          onsubmit="return confirm('Delete this period{% if not is_draft %} and its unapproved payment requests{% endif %}? This cannot be undone.')">
+      <button type="submit" class="btn-outline" style="font-size:.85rem; padding:7px 16px; color:var(--red); border-color:rgba(239,68,68,.35);">Delete Period</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 
