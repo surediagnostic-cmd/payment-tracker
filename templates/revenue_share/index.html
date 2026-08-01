@@ -136,10 +136,18 @@
             {{ p.created_at.strftime('%d %b %Y') if p.created_at else '—' }}
           </td>
           <td style="padding:12px 16px;">
-            <a href="{{ url_for('revenue_share.period_detail', period_id=p.id) }}"
-               style="color:var(--orange); text-decoration:none; font-size:.85rem; font-weight:500;">
-              View →
-            </a>
+            <div style="display:flex; gap:12px; align-items:center; justify-content:flex-end;">
+              <a href="{{ url_for('revenue_share.period_detail', period_id=p.id) }}"
+                 style="color:var(--orange); text-decoration:none; font-size:.85rem; font-weight:500;">
+                View →
+              </a>
+              {% if not p.payouts_executed %}
+              <form method="post" action="{{ url_for('revenue_share.delete_period', period_id=p.id) }}" style="margin:0;"
+                    onsubmit="return confirm('Delete “{{ p.label }}”? This cannot be undone.')">
+                <button type="submit" title="Delete period" style="background:none; border:none; color:var(--red); cursor:pointer; font-size:.85rem; padding:0;">Delete</button>
+              </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}
