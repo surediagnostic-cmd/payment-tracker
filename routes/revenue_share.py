@@ -417,6 +417,40 @@ def revert_period(period_id):
         return jsonify(ok=False, error=str(e)), 500
 
 
+@revenue_share_bp.route("/periods/<int:period_id>/delete", methods=["POST"])
+@login_required
+@_finance_required
+def delete_period(period_id):
+    """Delete a period whose payouts have not been executed (no linked payment
+    request approved/rejected). Any pending payout requests are removed with it."""
+    period = RevenueSharePeriod.query.get_or_404(period_id)
+
+    blocked = []
+    for alloc in period.allocations:
+        if alloc.payment_request_id:
+            pr = PaymentRequest.query.get(alloc.payment_request_id)
+            if pr and pr.status in ("approved", "rejected"):
+                blocked.append(pr.reference)
+    if blocked:
+        flash("Cannot delete — payout(s) already reviewed by MDS: " + ", ".join(blocked)
+              + ". Handle those payments first.", "error")
+        return redirect(url_for("revenue_share.period_detail", period_id=period_id))
+
+    # Remove any still-pending payout requests tied to this period
+    for alloc in period.allocations:
+        if alloc.payment_request_id:
+            pr = PaymentRequest.query.get(alloc.payment_request_id)
+            if pr:
+                PaymentRequestItem.query.filter_by(request_id=pr.id).delete()
+                db.session.delete(pr)
+
+    label = period.label
+    db.session.delete(period)   # cascade deletes its allocations
+    db.session.commit()
+    flash(f"Period '{label}' deleted.", "success")
+    return redirect(url_for("revenue_share.index"))
+
+
 @revenue_share_bp.route("/periods/<int:period_id>/allocations/<int:alloc_id>/toggle-paid", methods=["POST"])
 @login_required
 @_finance_required
