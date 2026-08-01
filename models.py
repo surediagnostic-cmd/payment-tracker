@@ -622,6 +622,15 @@ class RevenueSharePeriod(db.Model):
     def total_allocated_amount(self):
         return sum(float(a.amount_calculated or 0) for a in self.allocations)
 
+    @property
+    def payouts_executed(self):
+        """True once any payout for this period has been acted on by MDS
+        (approved or rejected) — such a period can no longer be edited or deleted."""
+        for a in self.allocations:
+            if a.payment_request and a.payment_request.status in ("approved", "rejected"):
+                return True
+        return False
+
 
 class RevenueShareAllocation(db.Model):
     __tablename__ = "revenue_share_allocations"
