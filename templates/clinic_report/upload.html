@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block title %}Upload Daily Branch Report{% endblock %}
+{% block page_title %}Upload Daily Branch Report{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:24px;">
+  <a href="{{ url_for('clinic_report.list_reports') }}" class="btn-outline" style="padding:6px 12px; font-size:12px;">← Back</a>
+  <div>
+    <div class="section-title">Upload from Excel</div>
+    <div style="color:var(--muted); font-size:13px; margin-top:2px;">
+      Upload your Branch Daily Ledger Report · review parsed data · save
+    </div>
+  </div>
+</div>
+
+{% if not parsed %}
+{# ── Step 1: choose file ──────────────────────────────────────────────────── #}
+<div class="card" style="padding:32px; max-width:520px;">
+  <div style="font-size:13px; font-weight:700; color:var(--orange2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:20px;">Select Ledger File</div>
+
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="action" value="parse">
+
+    <div style="margin-bottom:16px;">
+      <label class="label">Excel File (.xlsx) <span style="color:var(--red);">*</span></label>
+      <input type="file" name="ledger_file" accept=".xlsx,.xls" class="inp" required
+             style="padding:8px 12px; cursor:pointer;">
+      <div style="font-size:11px; color:var(--muted); margin-top:5px;">
+        Expected format: Branch Daily Ledger Report with Expenses (left) and Revenue + Payment Modes (right)
+      </div>
+    </div>
+
+    <button type="submit" class="btn-primary" style="width:100%; justify-content:center; padding:12px;">
+      Parse File →
+    </button>
+  </form>
+
+  <div style="margin-top:24px; padding:14px 16px; background:var(--bg2); border-radius:10px; border:1px solid var(--border);">
+    <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">Expected columns</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; color:var(--muted);">
+      <div>
+        <div style="color:var(--amber); font-weight:600; margin-bottom:4px;">Left side (A–B)</div>
+        <div>A: Expense description</div>
+        <div>B: Amount</div>
+      </div>
+      <div>
+        <div style="color:var(--green); font-weight:600; margin-bottom:4px;">Right side (D–E)</div>
+        <div>D: Service / Mode name</div>
+        <div>E: Amount</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+{# ── Step 2: preview + edit + confirm ─────────────────────────────────────── #}
+<form method="POST">
+  <input type="hidden" name="action" value="save">
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:1000px;">
+
+    <!-- Header -->
+    <div class="card" style="padding:22px; grid-column:1/-1;">
+      <div style="font-size:13px; font-weight:700; color:var(--orange2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:16px;">
+        Report Header
+        {% if parsed.branch_hint %}
+        <span style="font-weight:400; color:var(--muted); margin-left:10px; text-transform:none; font-size:12px; letter-spacing:0;">
+          Branch detected from file: <strong style="color:var(--white);">{{ parsed.branch_hint }}</strong>
+        </span>
+        {% endif %}
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:16px;">
+        <div>
+          <label class="label">Branch <span style="color:var(--red);">*</span></label>
+          <select name="branch_id" class="inp" required>
+            <option value="">Select branch…</option>
+            {% for b in branches %}
+            <option value="{{ b.id }}" {% if branch_hint_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Date <span style="color:var(--red);">*</span></label>
+          <input type="date" name="report_date" class="inp" value="{{ today }}" required>
+        </div>
+        <div>
+          <label class="label">Total Patients</label>
+          <input type="number" name="patient_count" class="inp" min="0"
+                 value="{{ parsed.patient_count if parsed.patient_count is not none else '' }}"
+                 placeholder="e.g. 11">
+        </div>
+        <div>
+          <label class="label">Notes</label>
+          <input type="text" name="notes" class="inp" placeholder="Imported from Excel">
+        </div>
+      </div>
+    </div>
+
+    <!-- Revenue by Service -->
+    <div class="card" style="padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="font-size:13px; font-weight:700; color:var(--green); text-transform:uppercase; letter-spacing:.5px;">
+          Revenue by Service
+          <span style="color:var(--muted); font-weight:400; font-size:11px; text-transform:none; margin-left:6px;">{{ parsed.revenue | length }} rows</span>
+        </div>
+        <button type="button" onclick="addRevRow()" class="btn-outline" style="padding:4px 10px; font-size:11px;">+ Add</button>
+      </div>
+      <div id="rev-rows">
+        {% for svc, amt in parsed.revenue %}
+        <div class="rev-row" style="display:flex; gap:8px; margin-bottom:7px; align-items:center;">
+          <input type="text" name="service[]" class="inp" value="{{ svc }}" placeholder="Service" style="flex:1; font-size:13px;">
+          <input type="number" name="rev_amount[]" class="inp rev-amt" value="{{ amt | int }}" min="0" step="0.01" style="width:120px; font-size:13px;">
+          <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+        </div>
+        {% endfor %}
+        {% if not parsed.revenue %}
+        <div class="rev-row" style="display:flex; gap:8px; margin-bottom:7px; align-items:center;">
+          <input type="text" name="service[]" class="inp" placeholder="Service" style="flex:1; font-size:13px;">
+          <input type="number" name="rev_amount[]" class="inp rev-amt" min="0" step="0.01" placeholder="0" style="width:120px; font-size:13px;">
+          <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+        </div>
+        {% endif %}
+      </div>
+      <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:8px; display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
+        <span>Total</span>
+        <span id="rev-total" style="color:var(--green);">₦{{ '{:,.0f}'.format(parsed.revenue | sum(attribute=1)) }}</span>
+      </div>
+    </div>
+
+    <!-- Payment Modes -->
+    <div class="card" style="padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="font-size:13px; font-weight:700; color:var(--blue2); text-transform:uppercase; letter-spacing:.5px;">
+          Payment Modes
+          <span style="color:var(--muted); font-weight:400; font-size:11px; text-transform:none; margin-left:6px;">{{ parsed.payment_modes | length }} rows</span>
+        </div>
+        <button type="button" onclick="addModeRow()" class="btn-outline" style="padding:4px 10px; font-size:11px;">+ Add</button>
+      </div>
+      <div id="mode-rows">
+        {% for mode, amt in parsed.payment_modes %}
+        <div class="mode-row" style="display:flex; gap:8px; margin-bottom:7px; align-items:center;">
+          <input type="text" name="mode[]" class="inp" value="{{ mode }}" placeholder="Mode" style="flex:1; font-size:13px;">
+          <input type="number" name="mode_amount[]" class="inp mode-amt" value="{{ amt | int }}" min="0" step="0.01" style="width:120px; font-size:13px;">
+          <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+        </div>
+        {% endfor %}
+        {% if not parsed.payment_modes %}
+        <div class="mode-row" style="display:flex; gap:8px; margin-bottom:7px; align-items:center;">
+          <input type="text" name="mode[]" class="inp" placeholder="Mode" style="flex:1; font-size:13px;">
+          <input type="number" name="mode_amount[]" class="inp mode-amt" min="0" step="0.01" placeholder="0" style="width:120px; font-size:13px;">
+          <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+        </div>
+        {% endif %}
+      </div>
+      <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:8px; display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
+        <span>Total</span>
+        <span id="mode-total" style="color:var(--blue2);">₦{{ '{:,.0f}'.format(parsed.payment_modes | sum(attribute=1)) }}</span>
+      </div>
+      <div id="mode-mismatch" style="display:none; margin-top:8px; font-size:11px; color:var(--amber); padding:6px 10px; background:rgba(245,158,11,.1); border-radius:6px; border:1px solid rgba(245,158,11,.25);">
+        ⚠ Revenue and mode totals don't match — please check.
+      </div>
+    </div>
+
+    <!-- Expenses -->
+    <div class="card" style="padding:22px; grid-column:1/-1;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div>
+          <div style="font-size:13px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:.5px;">
+            Daily Expenses
+            <span style="color:var(--muted); font-weight:400; font-size:11px; text-transform:none; margin-left:6px;">{{ parsed.expenses | length }} rows · pending approval</span>
+          </div>
+          <div style="font-size:11px; color:var(--muted); margin-top:3px;">
+            Tag each expense to a category and imprest source — required before approval
+          </div>
+        </div>
+        <button type="button" onclick="addExpRow()" class="btn-outline" style="padding:4px 10px; font-size:11px;">+ Add Row</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:2fr 100px 1.5fr 1.5fr 1.4fr 28px; gap:6px; margin-bottom:6px; padding:0 2px;">
+        <span class="label" style="margin:0;">Description</span>
+        <span class="label" style="margin:0;">Amount (₦)</span>
+        <span class="label" style="margin:0;">Expense Category</span>
+        <span class="label" style="margin:0;">Imprest Source</span>
+        <span class="label" style="margin:0;">Notes</span>
+        <span></span>
+      </div>
+
+      <div id="exp-rows">
+        {% for desc, amt in parsed.expenses %}
+        <div class="exp-row" style="display:grid; grid-template-columns:2fr 100px 1.5fr 1.5fr 1.4fr 28px; gap:6px; margin-bottom:6px; align-items:center;">
+          <input type="text" name="exp_desc[]" class="inp" value="{{ desc }}" style="font-size:13px;">
+          <input type="number" name="exp_amount[]" class="inp exp-amt" value="{{ amt | int }}" min="0" step="0.01" style="font-size:13px;">
+          <select name="exp_category_id[]" class="inp" style="font-size:13px;">
+            <option value="">— Category —</option>
+            {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <select name="exp_imprest_id[]" class="inp" style="font-size:13px;">
+            <option value="">— Imprest source —</option>
+            {% for ia in imprest_accounts %}
+            <option value="{{ ia.id }}">{{ ia.name }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" name="exp_notes[]" class="inp" placeholder="Optional" style="font-size:13px;">
+          <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;">×</button>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:8px; display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
+        <span>Total Claimed</span>
+        <span id="exp-total" style="color:var(--amber);">₦{{ '{:,.0f}'.format(parsed.expenses | sum(attribute=1)) }}</span>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="card" style="padding:18px; grid-column:1/-1; background:var(--bg2);">
+      <div style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:12px;">Summary Preview</div>
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Revenue</div>
+          <div class="kpi-value" id="sum-rev" style="font-size:18px; color:var(--green);">₦{{ '{:,.0f}'.format(parsed.revenue | sum(attribute=1)) }}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Claimed Expenses</div>
+          <div class="kpi-value" id="sum-exp" style="font-size:18px; color:var(--amber);">₦{{ '{:,.0f}'.format(parsed.expenses | sum(attribute=1)) }}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Net (after approval)</div>
+          <div class="kpi-value" id="sum-net" style="font-size:18px;">₦{{ '{:,.0f}'.format((parsed.revenue | sum(attribute=1)) - (parsed.expenses | sum(attribute=1))) }}</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Mode vs Revenue</div>
+          <div class="kpi-value" id="sum-diff" style="font-size:18px; color:var(--green);">
+            {% set rdiff = (parsed.revenue | sum(attribute=1)) - (parsed.payment_modes | sum(attribute=1)) %}
+            {% if rdiff|abs > 1 %}⚠ ₦{{ '{:,.0f}'.format(rdiff|abs) }}{% else %}OK{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
+    <button type="submit" class="btn-primary" style="padding:12px 28px;">✓ Save Report</button>
+    <a href="{{ url_for('clinic_report.upload_report') }}" class="btn-outline">Upload Different File</a>
+    <a href="{{ url_for('clinic_report.list_reports') }}" class="btn-outline">Cancel</a>
+  </div>
+</form>
+
+<!-- Hidden template for new expense row -->
+<template id="exp-row-tpl">
+  <div class="exp-row" style="display:grid; grid-template-columns:2fr 100px 1.5fr 1.5fr 1.4fr 28px; gap:6px; margin-bottom:6px; align-items:center;">
+    <input type="text" name="exp_desc[]" class="inp" placeholder="e.g. Airtime" style="font-size:13px;">
+    <input type="number" name="exp_amount[]" class="inp exp-amt" min="0" step="0.01" placeholder="0" style="font-size:13px;">
+    <select name="exp_category_id[]" class="inp" style="font-size:13px;">
+      <option value="">— Category —</option>
+      {% for c in categories %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="exp_imprest_id[]" class="inp" style="font-size:13px;">
+      <option value="">— Imprest source —</option>
+      {% for ia in imprest_accounts %}
+      <option value="{{ ia.id }}">{{ ia.name }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="exp_notes[]" class="inp" placeholder="Optional" style="font-size:13px;">
+    <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;">×</button>
+  </div>
+</template>
+
+<script>
+function fmt(n) { return '₦' + Math.round(n).toLocaleString(); }
+
+function removeRow(btn) {
+  btn.closest('.exp-row, .rev-row, .mode-row').remove();
+  recalc();
+}
+
+function addRevRow() {
+  const d = document.createElement('div');
+  d.className = 'rev-row';
+  d.style.cssText = 'display:flex;gap:8px;margin-bottom:7px;align-items:center;';
+  d.innerHTML = `<input type="text" name="service[]" class="inp" placeholder="Service" style="flex:1;font-size:13px;">
+    <input type="number" name="rev_amount[]" class="inp rev-amt" min="0" step="0.01" placeholder="0" style="width:120px;font-size:13px;" oninput="recalc()">
+    <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>`;
+  document.getElementById('rev-rows').appendChild(d);
+}
+
+function addModeRow() {
+  const d = document.createElement('div');
+  d.className = 'mode-row';
+  d.style.cssText = 'display:flex;gap:8px;margin-bottom:7px;align-items:center;';
+  d.innerHTML = `<input type="text" name="mode[]" class="inp" placeholder="Mode" style="flex:1;font-size:13px;">
+    <input type="number" name="mode_amount[]" class="inp mode-amt" min="0" step="0.01" placeholder="0" style="width:120px;font-size:13px;" oninput="recalc()">
+    <button type="button" onclick="removeRow(this)" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>`;
+  document.getElementById('mode-rows').appendChild(d);
+}
+
+function addExpRow() {
+  const tpl = document.getElementById('exp-row-tpl');
+  const clone = tpl.content.cloneNode(true);
+  clone.querySelector('.exp-amt').addEventListener('input', recalc);
+  document.getElementById('exp-rows').appendChild(clone);
+}
+
+function sumInputs(selector) {
+  let t = 0;
+  document.querySelectorAll(selector).forEach(el => { t += parseFloat(el.value) || 0; });
+  return t;
+}
+
+function recalc() {
+  const rev  = sumInputs('.rev-amt');
+  const mode = sumInputs('.mode-amt');
+  const exp  = sumInputs('.exp-amt');
+
+  document.getElementById('rev-total').textContent  = fmt(rev);
+  document.getElementById('mode-total').textContent = fmt(mode);
+  document.getElementById('exp-total').textContent  = fmt(exp);
+  document.getElementById('sum-rev').textContent    = fmt(rev);
+  document.getElementById('sum-exp').textContent    = fmt(exp);
+  document.getElementById('sum-net').textContent    = fmt(rev - exp);
+
+  const diff = Math.abs(rev - mode);
+  const mismatch = document.getElementById('mode-mismatch');
+  const sumDiff  = document.getElementById('sum-diff');
+  if (rev > 0 && diff > 1) {
+    mismatch.style.display = 'block';
+    sumDiff.textContent    = '⚠ ' + fmt(diff);
+    sumDiff.style.color    = 'var(--amber)';
+  } else {
+    mismatch.style.display = 'none';
+    sumDiff.textContent    = 'OK';
+    sumDiff.style.color    = 'var(--green)';
+  }
+}
+
+// Wire up existing rows
+document.querySelectorAll('.rev-amt, .mode-amt, .exp-amt').forEach(el => el.addEventListener('input', recalc));
+recalc();
+</script>
+{% endif %}
+{% endblock %}
