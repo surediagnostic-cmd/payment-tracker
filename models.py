@@ -64,6 +64,14 @@ class User(UserMixin, db.Model):
         return self.role in ("mds", "accountant", "branch_manager", "cashier")
 
     @property
+    def can_use_daily_report(self):
+        return self.role in ("mds", "accountant", "branch_manager", "cashier")
+
+    @property
+    def can_approve_daily_expense(self):
+        return self.role in ("mds", "accountant")
+
+    @property
     def branch(self):
         return self.branches[0] if self.branches else None
 
@@ -776,3 +784,108 @@ class ImprestActivityLog(db.Model):
 
     account = db.relationship("ImprestAccount")
     user    = db.relationship("User")
+
+
+# ── Daily Clinic Report ───────────────────────────────────────────────────────
+
+class DailyReport(db.Model):
+    """Header record for one branch's daily clinic ledger."""
+    __tablename__ = "daily_reports"
+    id            = db.Column(db.Integer, primary_key=True)
+    branch_id     = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    report_date   = db.Column(db.Date, nullable=False)
+    patient_count = db.Column(db.Integer, nullable=True)
+    notes         = db.Column(db.Text, nullable=True)
+    status        = db.Column(db.String(20), default="draft")  # draft | submitted | approved
+    submitted_by  = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at  = db.Column(db.DateTime, nullable=True)
+    approved_by   = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at   = db.Column(db.DateTime, nullable=True)
+    created_at    = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    branch          = db.relationship("Branch")
+    submitter       = db.relationship("User", foreign_keys=[submitted_by])
+    approver        = db.relationship("User", foreign_keys=[approved_by])
+    revenue_entries = db.relationship("DailyRevenueEntry", backref="report",
+                                      cascade="all, delete-orphan", lazy=True)
+    payment_modes   = db.relationship("DailyPaymentMode",  backref="report",
+                                      cascade="all, delete-orphan", lazy=True)
+    expense_entries = db.relationship("DailyExpenseEntry", backref="report",
+                                      cascade="all, delete-orphan", lazy=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("branch_id", "report_date", name="uq_daily_report_branch_date"),
+    )
+
+    @property
+    def total_revenue(self):
+        return sum(float(e.amount or 0) for e in self.revenue_entries)
+
+    @property
+    def total_claimed_expenses(self):
+        return sum(float(e.amount or 0) for e in self.expense_entries)
+
+    @property
+    def total_approved_expenses(self):
+        return sum(
+            float(e.approved_amount if e.approved_amount is not None else e.amount or 0)
+            for e in self.expense_entries if e.status == "approved"
+        )
+
+    @property
+    def net_revenue(self):
+        return round(self.total_revenue - self.total_approved_expenses, 2)
+
+    @property
+    def status_color(self):
+        return {"draft": "gray", "submitted": "yellow", "approved": "green"}.get(self.status, "gray")
+
+
+class DailyRevenueEntry(db.Model):
+    """Revenue breakdown by service type for a daily report."""
+    __tablename__ = "daily_revenue_entries"
+    id        = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey("daily_reports.id", ondelete="CASCADE"), nullable=False)
+    service   = db.Column(db.String(100), nullable=False)
+    amount    = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+
+
+class DailyPaymentMode(db.Model):
+    """Payment mode breakdown (Cash / POS / Transfer) for a daily report."""
+    __tablename__ = "daily_payment_modes"
+    id        = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey("daily_reports.id", ondelete="CASCADE"), nullable=False)
+    mode      = db.Column(db.String(100), nullable=False)
+    amount    = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+
+
+class DailyExpenseEntry(db.Model):
+    """Individual petty-cash expense line within a daily report.
+    Funded from an ImprestAccount. Approved by accountant or MDS.
+    Only approved lines reduce Net Revenue."""
+    __tablename__ = "daily_expense_entries"
+    id                 = db.Column(db.Integer, primary_key=True)
+    report_id          = db.Column(db.Integer, db.ForeignKey("daily_reports.id", ondelete="CASCADE"), nullable=False)
+    description        = db.Column(db.String(300), nullable=False)
+    category_id        = db.Column(db.Integer, db.ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+    imprest_account_id = db.Column(db.Integer, db.ForeignKey("imprest_accounts.id", ondelete="SET NULL"), nullable=True)
+    amount             = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    approved_amount    = db.Column(db.Numeric(14, 2), nullable=True)
+    status             = db.Column(db.String(20), default="pending")  # pending | approved | rejected
+    approved_by        = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at        = db.Column(db.DateTime, nullable=True)
+    notes              = db.Column(db.String(500), nullable=True)
+
+    category        = db.relationship("Category")
+    imprest_account = db.relationship("ImprestAccount")
+    approver        = db.relationship("User", foreign_keys=[approved_by])
+
+    @property
+    def effective_amount(self):
+        if self.status == "approved":
+            return float(self.approved_amount if self.approved_amount is not None else self.amount or 0)
+        return 0.0
+
+    @property
+    def status_color(self):
+        return {"pending": "yellow", "approved": "green", "rejected": "red"}.get(self.status, "gray")
