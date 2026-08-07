@@ -62,6 +62,7 @@ def create_app():
     from routes.inventory import inventory_bp
     from routes.revenue_share import revenue_share_bp
     from routes.imprest import imprest_bp
+    from routes.clinic_report import clinic_report_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(requests_bp)
@@ -72,6 +73,7 @@ def create_app():
     app.register_blueprint(inventory_bp)
     app.register_blueprint(revenue_share_bp)
     app.register_blueprint(imprest_bp)
+    app.register_blueprint(clinic_report_bp)
 
     @app.route("/")
     def root():
@@ -94,7 +96,7 @@ def create_app():
         if not current_user.is_authenticated or not getattr(current_user, "is_cashier", False):
             return
         ep = request.endpoint or ""
-        if ep.startswith("imprest") or ep.startswith("auth") or ep in ("root", "health", "static"):
+        if ep.startswith("imprest") or ep.startswith("clinic_report") or ep.startswith("auth") or ep in ("root", "health", "static"):
             return
         return redirect(url_for("imprest.dashboard"))
 
@@ -550,6 +552,86 @@ def _run_migrations():
             except Exception as e:
                 db.session.rollback()
                 print(f"[migration] revenue_share_periods period_type: {e}")
+
+    # 20. Daily Clinic Report tables
+    if 'daily_reports' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE daily_reports (
+                    id            SERIAL PRIMARY KEY,
+                    branch_id     INTEGER NOT NULL REFERENCES branches(id),
+                    report_date   DATE NOT NULL,
+                    patient_count INTEGER,
+                    notes         TEXT,
+                    status        VARCHAR(20) DEFAULT 'draft',
+                    submitted_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    submitted_at  TIMESTAMP,
+                    approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    approved_at   TIMESTAMP,
+                    created_at    TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_daily_report_branch_date UNIQUE (branch_id, report_date)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created daily_reports table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] daily_reports: {e}")
+
+    if 'daily_revenue_entries' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE daily_revenue_entries (
+                    id        SERIAL PRIMARY KEY,
+                    report_id INTEGER NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
+                    service   VARCHAR(100) NOT NULL,
+                    amount    NUMERIC(14,2) NOT NULL DEFAULT 0
+                )
+            """))
+            db.session.commit()
+            print("[migration] created daily_revenue_entries table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] daily_revenue_entries: {e}")
+
+    if 'daily_payment_modes' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE daily_payment_modes (
+                    id        SERIAL PRIMARY KEY,
+                    report_id INTEGER NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
+                    mode      VARCHAR(100) NOT NULL,
+                    amount    NUMERIC(14,2) NOT NULL DEFAULT 0
+                )
+            """))
+            db.session.commit()
+            print("[migration] created daily_payment_modes table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] daily_payment_modes: {e}")
+
+    if 'daily_expense_entries' not in tables:
+        try:
+            db.session.execute(text("""
+                CREATE TABLE daily_expense_entries (
+                    id                 SERIAL PRIMARY KEY,
+                    report_id          INTEGER NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
+                    description        VARCHAR(300) NOT NULL,
+                    category_id        INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+                    imprest_account_id INTEGER REFERENCES imprest_accounts(id) ON DELETE SET NULL,
+                    amount             NUMERIC(14,2) NOT NULL DEFAULT 0,
+                    approved_amount    NUMERIC(14,2),
+                    status             VARCHAR(20) DEFAULT 'pending',
+                    approved_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    approved_at        TIMESTAMP,
+                    notes              VARCHAR(500)
+                )
+            """))
+            db.session.commit()
+            print("[migration] created daily_expense_entries table")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[migration] daily_expense_entries: {e}")
 
 
 def _seed_defaults():
