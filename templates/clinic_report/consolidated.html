@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Consolidated Daily Report — {{ mo }}/{{ yr }}{% endblock %}
+{% block page_title %}Consolidated Daily Report{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+  <div>
+    <div class="section-title">Consolidated — {{ yr }}/{{ '%02d'|format(mo) }}</div>
+    <div style="color:var(--muted); font-size:13px; margin-top:3px;">All branches · all days for the selected month</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <form method="GET" style="display:flex; gap:8px; align-items:center;">
+      <input type="month" name="month" class="inp" style="width:auto;" value="{{ month_filter }}" onchange="this.form.submit()">
+    </form>
+    <a href="{{ url_for('clinic_report.list_reports') }}" class="btn-outline">Daily List</a>
+  </div>
+</div>
+
+{% if reports %}
+{% set total_rev  = reports | sum(attribute='total_revenue') %}
+{% set total_exp  = reports | sum(attribute='total_approved_expenses') %}
+{% set total_net  = total_rev - total_exp %}
+{% set total_pax  = reports | selectattr('patient_count') | sum(attribute='patient_count') %}
+
+<!-- Month KPIs -->
+<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:24px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Revenue</div>
+    <div class="kpi-value" style="color:var(--green);">₦{{ '{:,.0f}'.format(total_rev) }}</div>
+    <div class="kpi-sub">{{ reports | length }} days across {{ branches | length }} branches</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Approved Expenses</div>
+    <div class="kpi-value" style="color:var(--red);">₦{{ '{:,.0f}'.format(total_exp) }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Net Revenue</div>
+    <div class="kpi-value" style="color:{% if total_net >= 0 %}var(--white){% else %}var(--red){% endif %};">₦{{ '{:,.0f}'.format(total_net) }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Patients</div>
+    <div class="kpi-value">{{ '{:,}'.format(total_pax) }}</div>
+  </div>
+</div>
+
+<!-- Branch summary -->
+{% if branches | length > 1 %}
+<div class="card" style="padding:20px; margin-bottom:20px;">
+  <div style="font-size:12px; font-weight:700; color:var(--orange2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:14px;">By Branch</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Branch</th>
+        <th style="text-align:right;">Revenue</th>
+        <th style="text-align:right;">Approved Exp.</th>
+        <th style="text-align:right;">Net Revenue</th>
+        <th style="text-align:right;">Patients</th>
+        <th style="text-align:right;">Days</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in branches %}
+      {% set b_reports = reports | selectattr('branch_id', 'eq', b.id) | list %}
+      {% if b_reports %}
+      {% set b_rev = b_reports | sum(attribute='total_revenue') %}
+      {% set b_exp = b_reports | sum(attribute='total_approved_expenses') %}
+      <tr>
+        <td style="font-weight:600;">{{ b.name }}</td>
+        <td style="text-align:right; color:var(--green);">₦{{ '{:,.0f}'.format(b_rev) }}</td>
+        <td style="text-align:right; color:var(--red);">₦{{ '{:,.0f}'.format(b_exp) }}</td>
+        <td style="text-align:right; font-weight:700;">₦{{ '{:,.0f}'.format(b_rev - b_exp) }}</td>
+        <td style="text-align:right; color:var(--muted);">{{ b_reports | selectattr('patient_count') | sum(attribute='patient_count') }}</td>
+        <td style="text-align:right; color:var(--muted);">{{ b_reports | length }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="background:rgba(245,130,31,.06);">
+        <td style="font-weight:700;">Grand Total</td>
+        <td style="text-align:right; font-weight:700; color:var(--green);">₦{{ '{:,.0f}'.format(total_rev) }}</td>
+        <td style="text-align:right; font-weight:700; color:var(--red);">₦{{ '{:,.0f}'.format(total_exp) }}</td>
+        <td style="text-align:right; font-weight:700;">₦{{ '{:,.0f}'.format(total_net) }}</td>
+        <td style="text-align:right; font-weight:700;">{{ total_pax }}</td>
+        <td style="text-align:right; font-weight:700;">{{ reports | length }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+
+<!-- Day-by-day table -->
+<div class="card" style="padding:20px; overflow-x:auto;">
+  <div style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:14px;">Day-by-Day</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        {% if branches | length > 1 %}<th>Branch</th>{% endif %}
+        <th style="text-align:right;">Revenue</th>
+        <th style="text-align:right;">Exp. (claimed)</th>
+        <th style="text-align:right;">Exp. (approved)</th>
+        <th style="text-align:right;">Net</th>
+        <th style="text-align:right;">Patients</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr>
+        <td style="white-space:nowrap; font-weight:600;">{{ r.report_date.strftime('%d %b') }}</td>
+        {% if branches | length > 1 %}<td>{{ r.branch.name }}</td>{% endif %}
+        <td style="text-align:right; color:var(--green);">₦{{ '{:,.0f}'.format(r.total_revenue) }}</td>
+        <td style="text-align:right; color:var(--muted); font-size:12px;">₦{{ '{:,.0f}'.format(r.total_claimed_expenses) }}</td>
+        <td style="text-align:right; color:var(--red);">₦{{ '{:,.0f}'.format(r.total_approved_expenses) }}</td>
+        <td style="text-align:right; font-weight:700;">₦{{ '{:,.0f}'.format(r.net_revenue) }}</td>
+        <td style="text-align:right; color:var(--muted);">{{ r.patient_count if r.patient_count is not none else '—' }}</td>
+        <td><span class="badge badge-{{ r.status_color }}">{{ r.status | capitalize }}</span></td>
+        <td><a href="{{ url_for('clinic_report.view_report', report_id=r.id) }}" class="btn-outline" style="padding:4px 10px; font-size:11px;">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+<div class="card" style="padding:48px; text-align:center; color:var(--muted);">
+  <div style="font-size:32px; margin-bottom:12px;">📊</div>
+  <div style="font-size:15px; font-weight:600; margin-bottom:6px;">No reports for this month</div>
+  <a href="{{ url_for('clinic_report.new_report') }}" class="btn-primary" style="margin-top:12px;">+ New Report</a>
+</div>
+{% endif %}
+
+{% endblock %}
