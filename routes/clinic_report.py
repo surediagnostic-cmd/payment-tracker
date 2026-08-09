@@ -355,6 +355,7 @@ def _parse_ledger_excel(file_bytes):
 
     result = {
         "branch_hint": None,
+        "report_date": None,  # extracted from Excel if present
         "patient_count": None,
         "expenses": [],       # [(description, amount)]
         "revenue": [],        # [(service, amount)]
@@ -366,11 +367,28 @@ def _parse_ledger_excel(file_bytes):
         result["errors"].append("File appears to be empty.")
         return result
 
-    # Row 1 — branch hint
+    # Row 1 — branch hint from title "(BranchName)"
     first_cell = str(rows[0][0] or "")
     m = re.search(r'\(([^)]+)\)', first_cell)
     if m:
         result["branch_hint"] = m.group(1).strip()
+
+    # Row 2 — date field: Col A = "Date:", Col B = date value
+    if len(rows) > 1:
+        r2 = list(rows[1]) + [None] * 5
+        a2_str = str(r2[0] or "").strip().lower()
+        if "date" in a2_str and r2[1] is not None:
+            import datetime as _dt
+            v = r2[1]
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                result["report_date"] = v.date() if isinstance(v, _dt.datetime) else v
+            elif isinstance(v, str):
+                for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y"):
+                    try:
+                        result["report_date"] = _dt.datetime.strptime(v.strip(), fmt).date()
+                        break
+                    except ValueError:
+                        pass
 
     SKIP_LEFT = {"total", "expenses", "item", ""}
     SKIP_RIGHT = {"total", "service", "amount", "mode", "revenue by service",
@@ -483,11 +501,18 @@ def upload_report():
                         branch_hint_id = b.id
                         break
 
+            # Use extracted date as default, fall back to today
+            default_date = (
+                parsed["report_date"].strftime("%Y-%m-%d")
+                if parsed.get("report_date") else
+                date_type.today().strftime("%Y-%m-%d")
+            )
             return render_template("clinic_report/upload.html",
                                    branches=branches, categories=categories,
                                    imprest_accounts=imprest_accounts,
                                    parsed=parsed, branch_hint_id=branch_hint_id,
-                                   today=date_type.today().strftime("%Y-%m-%d"))
+                                   today=default_date,
+                                   date_from_excel=bool(parsed.get("report_date")))
 
         # ── Step 2: confirm & save ────────────────────────────────────────────
         elif action == "save":
