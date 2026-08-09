@@ -253,6 +253,22 @@ def view_report(report_id):
     )
 
 
+@clinic_report_bp.route("/<int:report_id>/delete", methods=["POST"])
+@login_required
+def delete_report(report_id):
+    if not current_user.is_mds:
+        abort(403)
+    report = DailyReport.query.get_or_404(report_id)
+    db.session.delete(report)
+    db.session.commit()
+    flash(
+        f"Report for {report.branch.name} on "
+        f"{report.report_date.strftime('%d %b %Y')} deleted.",
+        "success",
+    )
+    return redirect(url_for("clinic_report.list_reports"))
+
+
 @clinic_report_bp.route("/<int:report_id>/expense/<int:exp_id>/action", methods=["POST"])
 @login_required
 def expense_action(report_id, exp_id):
