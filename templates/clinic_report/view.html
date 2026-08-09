@@ -19,12 +19,20 @@
       </div>
     </div>
   </div>
-  {% if current_user.can_approve_daily_expense and report.status == 'submitted' %}
-  <form method="POST" action="{{ url_for('clinic_report.approve_report', report_id=report.id) }}"
-        onsubmit="return confirm('Approve entire report and auto-approve all pending expenses?');">
-    <button class="btn-primary">✓ Approve Report</button>
-  </form>
-  {% endif %}
+  <div style="display:flex; gap:8px; align-items:center;">
+    {% if current_user.can_approve_daily_expense and report.status == 'submitted' %}
+    <form method="POST" action="{{ url_for('clinic_report.approve_report', report_id=report.id) }}"
+          onsubmit="return confirm('Approve entire report and auto-approve all pending expenses?');">
+      <button class="btn-primary">✓ Approve Report</button>
+    </form>
+    {% endif %}
+    {% if current_user.is_mds %}
+    <form method="POST" action="{{ url_for('clinic_report.delete_report', report_id=report.id) }}"
+          onsubmit="return confirm('Permanently delete this report for {{ report.branch.name }} on {{ report.report_date.strftime(\'%d %b %Y\') }}?\n\nAll revenue, expense, and payment entries will be removed. This cannot be undone.');">
+      <button type="submit" class="btn-danger" style="padding:8px 16px; font-size:13px;">🗑 Delete Report</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 
 <!-- KPI Summary -->
