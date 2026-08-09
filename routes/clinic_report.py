@@ -259,13 +259,11 @@ def delete_report(report_id):
     if not current_user.is_mds:
         abort(403)
     report = DailyReport.query.get_or_404(report_id)
+    branch_name  = report.branch.name
+    report_label = report.report_date.strftime("%d %b %Y")
     db.session.delete(report)
     db.session.commit()
-    flash(
-        f"Report for {report.branch.name} on "
-        f"{report.report_date.strftime('%d %b %Y')} deleted.",
-        "success",
-    )
+    flash(f"Report for {branch_name} on {report_label} deleted.", "success")
     return redirect(url_for("clinic_report.list_reports"))
 
 
