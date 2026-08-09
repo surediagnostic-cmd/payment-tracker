@@ -82,11 +82,17 @@
         <div>
           <label class="label">
             Report Date <span style="color:var(--red);">*</span>
+            {% if date_from_excel %}
+            <span style="font-weight:400; color:var(--green); font-size:10px; text-transform:none; margin-left:4px;">✓ read from file</span>
+            {% else %}
             <span style="font-weight:400; color:var(--amber); font-size:10px; text-transform:none; margin-left:4px;">← set to actual date of the report</span>
+            {% endif %}
           </label>
           <input type="date" name="report_date" class="inp" value="{{ today }}" required
-                 style="border-color:var(--amber);">
-          <div style="font-size:10px; color:var(--muted); margin-top:3px;">Defaults to today — change to the date the ledger covers</div>
+                 style="border-color:{% if date_from_excel %}var(--green){% else %}var(--amber){% endif %};">
+          <div style="font-size:10px; color:var(--muted); margin-top:3px;">
+            {% if date_from_excel %}Date extracted from the Excel file — verify it's correct{% else %}Not found in file — defaults to today, change to the ledger date{% endif %}
+          </div>
         </div>
         <div>
           <label class="label">Total Patients</label>
