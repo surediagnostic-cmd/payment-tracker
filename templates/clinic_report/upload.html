@@ -80,8 +80,13 @@
           </select>
         </div>
         <div>
-          <label class="label">Date <span style="color:var(--red);">*</span></label>
-          <input type="date" name="report_date" class="inp" value="{{ today }}" required>
+          <label class="label">
+            Report Date <span style="color:var(--red);">*</span>
+            <span style="font-weight:400; color:var(--amber); font-size:10px; text-transform:none; margin-left:4px;">← set to actual date of the report</span>
+          </label>
+          <input type="date" name="report_date" class="inp" value="{{ today }}" required
+                 style="border-color:var(--amber);">
+          <div style="font-size:10px; color:var(--muted); margin-top:3px;">Defaults to today — change to the date the ledger covers</div>
         </div>
         <div>
           <label class="label">Total Patients</label>
