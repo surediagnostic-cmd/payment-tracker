@@ -73,7 +73,7 @@
           <td>{{ e.service }}</td>
           <td style="text-align:right; font-weight:600;">₦{{ '{:,.0f}'.format(e.amount) }}</td>
           <td style="text-align:right; color:var(--muted);">
-            {% if report.total_revenue > 0 %}{{ '{:.1f}'.format(e.amount / report.total_revenue * 100) }}%{% else %}—{% endif %}
+            {% if report.total_revenue > 0 %}{{ '{:.1f}'.format(e.amount | float / report.total_revenue * 100) }}%{% else %}—{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -102,13 +102,13 @@
         </tr>
       </thead>
       <tbody>
-        {% set mode_total = report.payment_modes | sum(attribute='amount') %}
+        {% set mode_total = (report.payment_modes | sum(attribute='amount')) | float %}
         {% for m in report.payment_modes | sort(attribute='amount', reverse=True) %}
         <tr>
           <td>{{ m.mode }}</td>
-          <td style="text-align:right; font-weight:600;">₦{{ '{:,.0f}'.format(m.amount) }}</td>
+          <td style="text-align:right; font-weight:600;">₦{{ '{:,.0f}'.format(m.amount | float) }}</td>
           <td style="text-align:right; color:var(--muted);">
-            {% if mode_total > 0 %}{{ '{:.1f}'.format(m.amount / mode_total * 100) }}%{% else %}—{% endif %}
+            {% if mode_total > 0 %}{{ '{:.1f}'.format(m.amount | float / mode_total * 100) }}%{% else %}—{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -119,9 +119,10 @@
         </tr>
       </tbody>
     </table>
-    {% if mode_total != report.total_revenue and report.total_revenue > 0 %}
+    {% set rev_total = report.total_revenue | float %}
+    {% if (mode_total - rev_total) | abs > 1 and rev_total > 0 %}
     <div style="margin-top:10px; padding:8px 12px; background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.25); border-radius:8px; font-size:12px; color:var(--amber);">
-      ⚠ Mode total (₦{{ '{:,.0f}'.format(mode_total) }}) differs from revenue total (₦{{ '{:,.0f}'.format(report.total_revenue) }}) by ₦{{ '{:,.0f}'.format((mode_total - report.total_revenue)|abs) }}
+      ⚠ Mode total (₦{{ '{:,.0f}'.format(mode_total) }}) differs from revenue total (₦{{ '{:,.0f}'.format(rev_total) }}) by ₦{{ '{:,.0f}'.format((mode_total - rev_total) | abs) }}
     </div>
     {% endif %}
     {% else %}
