@@ -267,6 +267,173 @@ def delete_report(report_id):
     return redirect(url_for("clinic_report.list_reports"))
 
 
+@clinic_report_bp.route("/<int:report_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_report(report_id):
+    _guard()
+    report = DailyReport.query.get_or_404(report_id)
+
+    branch_ids = _branch_ids_for_user()
+    if branch_ids is not None and report.branch_id not in branch_ids:
+        abort(403)
+
+    # Only MDS or accountant can edit approved reports; others can edit their own submitted/draft
+    if report.status == "approved" and not current_user.can_approve_daily_expense:
+        flash("Approved reports can only be edited by MDS or an accountant.", "warning")
+        return redirect(url_for("clinic_report.view_report", report_id=report_id))
+
+    branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
+    if branch_ids is not None:
+        branches = [b for b in branches if b.id in branch_ids]
+
+    categories      = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    imp_q           = ImprestAccount.query.filter_by(is_active=True).order_by(ImprestAccount.name)
+    if branch_ids is not None:
+        imp_q = imp_q.filter(ImprestAccount.branch_id.in_(branch_ids + [None]))
+    imprest_accounts = imp_q.all()
+
+    if request.method == "POST":
+        try:
+            new_branch_id   = int(request.form["branch_id"])
+            new_date        = datetime.strptime(request.form["report_date"], "%Y-%m-%d").date()
+            pc_raw          = request.form.get("patient_count", "").strip()
+            patient_count   = int(pc_raw) if pc_raw else None
+            notes           = request.form.get("notes", "").strip() or None
+
+            if branch_ids is not None and new_branch_id not in branch_ids:
+                flash("You do not have access to that branch.", "error")
+                return redirect(url_for("clinic_report.edit_report", report_id=report_id))
+
+            # Duplicate-date check (ignore self)
+            clash = DailyReport.query.filter_by(
+                branch_id=new_branch_id, report_date=new_date
+            ).filter(DailyReport.id != report_id).first()
+            if clash:
+                flash(
+                    f"Another report already exists for that branch and date. "
+                    f"<a href='{url_for('clinic_report.view_report', report_id=clash.id)}' "
+                    f"style='color:var(--orange2);text-decoration:underline;'>View it.</a>",
+                    "warning",
+                )
+                return redirect(url_for("clinic_report.edit_report", report_id=report_id))
+
+            # Update header
+            report.branch_id     = new_branch_id
+            report.report_date   = new_date
+            report.patient_count = patient_count
+            report.notes         = notes
+
+            # ── Revenue entries: wipe and replace ──────────────────────────
+            for e in list(report.revenue_entries):
+                db.session.delete(e)
+            services    = request.form.getlist("service[]")
+            rev_amounts = request.form.getlist("rev_amount[]")
+            for svc, amt_str in zip(services, rev_amounts):
+                svc     = svc.strip()
+                amt_str = amt_str.strip().replace(",", "")
+                if svc and amt_str:
+                    try:
+                        amt = float(amt_str)
+                        if amt > 0:
+                            db.session.add(DailyRevenueEntry(
+                                report_id=report.id, service=svc, amount=amt
+                            ))
+                    except ValueError:
+                        pass
+
+            # ── Payment modes: wipe and replace ────────────────────────────
+            for m in list(report.payment_modes):
+                db.session.delete(m)
+            modes       = request.form.getlist("mode[]")
+            mode_amts   = request.form.getlist("mode_amount[]")
+            for mode, amt_str in zip(modes, mode_amts):
+                mode    = mode.strip()
+                amt_str = amt_str.strip().replace(",", "")
+                if mode and amt_str:
+                    try:
+                        amt = float(amt_str)
+                        if amt > 0:
+                            db.session.add(DailyPaymentMode(
+                                report_id=report.id, mode=mode, amount=amt
+                            ))
+                    except ValueError:
+                        pass
+
+            # ── Expense entries: edit in place by ID, add new, remove deleted ──
+            kept_ids    = set()
+            exp_ids     = request.form.getlist("exp_id[]")
+            exp_descs   = request.form.getlist("exp_desc[]")
+            exp_amts    = request.form.getlist("exp_amount[]")
+            exp_cats    = request.form.getlist("exp_category_id[]")
+            exp_imps    = request.form.getlist("exp_imprest_id[]")
+            exp_notes_l = request.form.getlist("exp_notes[]")
+
+            existing_exp = {e.id: e for e in report.expense_entries}
+
+            for i, (eid, desc, amt_str) in enumerate(zip(exp_ids, exp_descs, exp_amts)):
+                desc    = desc.strip()
+                amt_str = amt_str.strip().replace(",", "")
+                if not desc or not amt_str:
+                    continue
+                try:
+                    amt = float(amt_str)
+                    if amt <= 0:
+                        continue
+                except ValueError:
+                    continue
+
+                cat_id = int(exp_cats[i]) if i < len(exp_cats) and exp_cats[i] else None
+                imp_id = int(exp_imps[i]) if i < len(exp_imps) and exp_imps[i] else None
+                note   = (exp_notes_l[i].strip() if i < len(exp_notes_l) else "") or None
+
+                try:
+                    eid_int = int(eid)
+                except (ValueError, TypeError):
+                    eid_int = None
+
+                if eid_int and eid_int in existing_exp:
+                    # Update existing — preserve approval state
+                    exp = existing_exp[eid_int]
+                    exp.description        = desc
+                    exp.amount             = amt
+                    exp.category_id        = cat_id
+                    exp.imprest_account_id = imp_id
+                    exp.notes              = note
+                    kept_ids.add(eid_int)
+                else:
+                    # New row
+                    db.session.add(DailyExpenseEntry(
+                        report_id=report.id,
+                        description=desc,
+                        amount=amt,
+                        category_id=cat_id,
+                        imprest_account_id=imp_id,
+                        notes=note,
+                        status="pending",
+                    ))
+
+            # Delete rows that were removed in the form
+            for eid, exp in existing_exp.items():
+                if eid not in kept_ids:
+                    db.session.delete(exp)
+
+            db.session.commit()
+            flash("Report updated successfully.", "success")
+            return redirect(url_for("clinic_report.view_report", report_id=report_id))
+
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Error saving changes: {exc}", "error")
+
+    return render_template(
+        "clinic_report/edit.html",
+        report=report,
+        branches=branches,
+        categories=categories,
+        imprest_accounts=imprest_accounts,
+    )
+
+
 @clinic_report_bp.route("/<int:report_id>/expense/<int:exp_id>/action", methods=["POST"])
 @login_required
 def expense_action(report_id, exp_id):
