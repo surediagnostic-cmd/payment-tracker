@@ -273,14 +273,13 @@ def edit_report(report_id):
     _guard()
     report = DailyReport.query.get_or_404(report_id)
 
+    if not current_user.can_approve_daily_expense:
+        flash("Only MDS or an accountant can edit reports.", "warning")
+        return redirect(url_for("clinic_report.view_report", report_id=report_id))
+
     branch_ids = _branch_ids_for_user()
     if branch_ids is not None and report.branch_id not in branch_ids:
         abort(403)
-
-    # Only MDS or accountant can edit approved reports; others can edit their own submitted/draft
-    if report.status == "approved" and not current_user.can_approve_daily_expense:
-        flash("Approved reports can only be edited by MDS or an accountant.", "warning")
-        return redirect(url_for("clinic_report.view_report", report_id=report_id))
 
     branches = Branch.query.filter_by(is_active=True).order_by(Branch.name).all()
     if branch_ids is not None:
