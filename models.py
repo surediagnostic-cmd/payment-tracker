@@ -701,7 +701,24 @@ class ImprestAccount(db.Model):
 
     @property
     def total_spent(self):
-        return sum(float(e.amount or 0) for e in self.expenses)
+        # Direct imprest expenses (manually entered / Zoho import)
+        direct = sum(float(e.amount or 0) for e in self.expenses)
+        # Approved daily-report expense entries tagged to this imprest account.
+        # DailyExpenseEntry is defined later in this module — safe to reference
+        # at call-time because the full module is loaded before any property is invoked.
+        daily = db.session.query(
+            db.func.coalesce(
+                db.func.sum(
+                    db.func.coalesce(DailyExpenseEntry.approved_amount,
+                                     DailyExpenseEntry.amount)
+                ),
+                0
+            )
+        ).filter(
+            DailyExpenseEntry.imprest_account_id == self.id,
+            DailyExpenseEntry.status == "approved",
+        ).scalar()
+        return direct + float(daily or 0)
 
     @property
     def balance(self):
