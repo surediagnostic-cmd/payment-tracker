@@ -26,6 +26,9 @@
       <button class="btn-primary">✓ Approve Report</button>
     </form>
     {% endif %}
+    {% if current_user.can_approve_daily_expense %}
+    <a href="{{ url_for('clinic_report.edit_report', report_id=report.id) }}" class="btn-outline" style="padding:8px 16px; font-size:13px;">✏ Edit Report</a>
+    {% endif %}
     {% if current_user.is_mds %}
     {% set del_msg = "Permanently delete the report for " ~ report.branch.name ~ " on " ~ report.report_date.strftime("%d %b %Y") ~ "?\n\nAll revenue, expense and payment entries will be removed. This cannot be undone." %}
     <form method="POST" action="{{ url_for('clinic_report.delete_report', report_id=report.id) }}"
