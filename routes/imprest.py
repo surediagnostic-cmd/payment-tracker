@@ -12,10 +12,12 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from app import db
+import calendar
 from models import (
     ImprestAccount, Expense, ImprestActivityLog,
     Category, Branch, User,
     PaymentRequest, PaymentRequestItem,
+    DailyExpenseEntry, DailyReport,
 )
 
 imprest_bp = Blueprint("imprest", __name__, url_prefix="/imprest")
@@ -522,6 +524,208 @@ def import_expenses():
         db.session.rollback()
         flash(f"Import failed: {e}", "error")
     return redirect(url_for("imprest.expenses"))
+
+
+# ── Unified Transaction List ──────────────────────────────────────────────────
+
+@imprest_bp.route("/transactions")
+@login_required
+@_imprest_view
+def transactions():
+    # ── Filters ────────────────────────────────────────────────────────────
+    branch_id   = request.args.get("branch_id",   type=int)
+    account_id  = request.args.get("account_id",  type=int)
+    category_id = request.args.get("category_id", type=int)
+    source      = request.args.get("source", "all")   # all | direct | daily
+    status_f    = request.args.get("status",  "all")  # all | approved | pending | rejected
+    month       = request.args.get("month", "")       # YYYY-MM
+    date_from   = _parse_date(request.args.get("date_from", ""))
+    date_to     = _parse_date(request.args.get("date_to",   ""))
+
+    # Expand month shortcut into a date range
+    if month:
+        try:
+            yr, mo = int(month[:4]), int(month[5:7])
+            _, last_day = calendar.monthrange(yr, mo)
+            date_from = date_from or date_type(yr, mo, 1)
+            date_to   = date_to   or date_type(yr, mo, last_day)
+        except Exception:
+            pass
+
+    allowed      = _allowed_branch_ids()
+    visible_accs = _visible_accounts()
+    acc_ids      = [a.id for a in visible_accs]
+
+    STATUS_COLOR = {"approved": "green", "pending": "amber", "rejected": "red", "recorded": "blue"}
+
+    rows = []
+
+    # ── Direct Expenses ─────────────────────────────────────────────────────
+    if source in ("all", "direct"):
+        q = Expense.query
+        if allowed is not None:
+            q = q.filter(Expense.account_id.in_(acc_ids or [-1]))
+        if account_id:
+            q = q.filter(Expense.account_id == account_id)
+        if category_id:
+            q = q.filter(Expense.category_id == category_id)
+        if branch_id:
+            q = q.filter(Expense.branch_id == branch_id)
+        if date_from:
+            q = q.filter(Expense.date >= date_from)
+        if date_to:
+            q = q.filter(Expense.date <= date_to)
+        if status_f not in ("all", "recorded"):
+            q = q.filter(False)   # direct expenses have no pending/rejected state
+
+        for e in q.order_by(Expense.date.desc(), Expense.id.desc()).limit(1000).all():
+            branch_name = (e.branch.name if e.branch
+                          else (e.account.branch.name if e.account and e.account.branch else "—"))
+            rows.append(dict(
+                date=e.date,
+                description=e.description or "—",
+                category=e.category.name if e.category else "—",
+                branch=branch_name,
+                account=e.account.name if e.account else "—",
+                account_id=e.account_id,
+                amount=float(e.amount or 0),
+                source="direct",
+                source_label="Direct",
+                status="recorded",
+                status_color="blue",
+                report_id=None,
+                report_label=None,
+                by=e.creator.name if e.creator else "—",
+            ))
+
+    # ── Daily Branch Report Expenses ────────────────────────────────────────
+    if source in ("all", "daily"):
+        q = (db.session.query(DailyExpenseEntry, DailyReport)
+             .join(DailyReport, DailyExpenseEntry.report_id == DailyReport.id))
+        if allowed is not None:
+            q = q.filter(DailyReport.branch_id.in_(allowed or [-1]))
+        if account_id:
+            q = q.filter(DailyExpenseEntry.imprest_account_id == account_id)
+        if category_id:
+            q = q.filter(DailyExpenseEntry.category_id == category_id)
+        if branch_id:
+            q = q.filter(DailyReport.branch_id == branch_id)
+        if date_from:
+            q = q.filter(DailyReport.report_date >= date_from)
+        if date_to:
+            q = q.filter(DailyReport.report_date <= date_to)
+        if status_f != "all":
+            q = q.filter(DailyExpenseEntry.status == status_f)
+
+        for exp, report in q.order_by(DailyReport.report_date.desc(), DailyExpenseEntry.id.desc()).limit(1000).all():
+            eff_amount = float(exp.approved_amount or exp.amount or 0)
+            rows.append(dict(
+                date=report.report_date,
+                description=exp.description or "—",
+                category=exp.category.name if exp.category else "—",
+                branch=report.branch.name if report.branch else "—",
+                account=exp.imprest_account.name if exp.imprest_account else "—",
+                account_id=exp.imprest_account_id,
+                amount=eff_amount,
+                source="daily",
+                source_label="Daily Report",
+                status=exp.status,
+                status_color=STATUS_COLOR.get(exp.status, "amber"),
+                report_id=report.id,
+                report_label=f"{report.branch.name if report.branch else '?'} · {report.report_date.strftime('%d %b %Y')}",
+                by=report.submitter.name if report.submitted_by else "—",
+            ))
+
+    rows.sort(key=lambda r: (r["date"] or date_type.min), reverse=True)
+    total      = sum(r["amount"] for r in rows)
+    direct_tot = sum(r["amount"] for r in rows if r["source"] == "direct")
+    daily_tot  = sum(r["amount"] for r in rows if r["source"] == "daily")
+
+    return render_template("imprest/transactions.html",
+        rows=rows, total=total,
+        direct_total=direct_tot, daily_total=daily_tot,
+        accounts=visible_accs,
+        categories=Category.query.filter_by(is_active=True).order_by(Category.name).all(),
+        branches=Branch.query.filter_by(is_active=True).order_by(Branch.name).all(),
+        args=request.args,
+    )
+
+
+@imprest_bp.route("/transactions/export")
+@login_required
+@_imprest_view
+def export_transactions():
+    # Build rows the same way as transactions() then emit CSV
+    branch_id   = request.args.get("branch_id",   type=int)
+    account_id  = request.args.get("account_id",  type=int)
+    category_id = request.args.get("category_id", type=int)
+    source      = request.args.get("source", "all")
+    status_f    = request.args.get("status",  "all")
+    month       = request.args.get("month", "")
+    date_from   = _parse_date(request.args.get("date_from", ""))
+    date_to     = _parse_date(request.args.get("date_to",   ""))
+
+    if month:
+        try:
+            yr, mo = int(month[:4]), int(month[5:7])
+            _, last_day = calendar.monthrange(yr, mo)
+            date_from = date_from or date_type(yr, mo, 1)
+            date_to   = date_to   or date_type(yr, mo, last_day)
+        except Exception:
+            pass
+
+    allowed      = _allowed_branch_ids()
+    visible_accs = _visible_accounts()
+    acc_ids      = [a.id for a in visible_accs]
+    STATUS_COLOR = {"approved": "green", "pending": "amber", "rejected": "red", "recorded": "blue"}
+    rows = []
+
+    if source in ("all", "direct"):
+        q = Expense.query
+        if allowed is not None:
+            q = q.filter(Expense.account_id.in_(acc_ids or [-1]))
+        if account_id:  q = q.filter(Expense.account_id == account_id)
+        if category_id: q = q.filter(Expense.category_id == category_id)
+        if branch_id:   q = q.filter(Expense.branch_id == branch_id)
+        if date_from:   q = q.filter(Expense.date >= date_from)
+        if date_to:     q = q.filter(Expense.date <= date_to)
+        if status_f not in ("all", "recorded"): q = q.filter(False)
+        for e in q.all():
+            bname = e.branch.name if e.branch else (e.account.branch.name if e.account and e.account.branch else "")
+            rows.append(dict(date=e.date, description=e.description or "", category=e.category.name if e.category else "",
+                branch=bname, account=e.account.name if e.account else "", amount=float(e.amount or 0),
+                source="Direct", status="Recorded", report="", by=e.creator.name if e.creator else ""))
+
+    if source in ("all", "daily"):
+        q = (db.session.query(DailyExpenseEntry, DailyReport)
+             .join(DailyReport, DailyExpenseEntry.report_id == DailyReport.id))
+        if allowed is not None: q = q.filter(DailyReport.branch_id.in_(allowed or [-1]))
+        if account_id:  q = q.filter(DailyExpenseEntry.imprest_account_id == account_id)
+        if category_id: q = q.filter(DailyExpenseEntry.category_id == category_id)
+        if branch_id:   q = q.filter(DailyReport.branch_id == branch_id)
+        if date_from:   q = q.filter(DailyReport.report_date >= date_from)
+        if date_to:     q = q.filter(DailyReport.report_date <= date_to)
+        if status_f != "all": q = q.filter(DailyExpenseEntry.status == status_f)
+        for exp, report in q.all():
+            rows.append(dict(date=report.report_date, description=exp.description or "",
+                category=exp.category.name if exp.category else "",
+                branch=report.branch.name if report.branch else "",
+                account=exp.imprest_account.name if exp.imprest_account else "",
+                amount=float(exp.approved_amount or exp.amount or 0),
+                source="Daily Report", status=exp.status.capitalize(),
+                report=f"{report.branch.name if report.branch else '?'} {report.report_date.strftime('%d %b %Y')}",
+                by=report.submitter.name if report.submitted_by else ""))
+
+    rows.sort(key=lambda r: (r["date"] or date_type.min), reverse=True)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Date", "Description", "Category", "Branch", "Imprest Account", "Amount (₦)", "Source", "Status", "Daily Report", "Recorded By"])
+    for r in rows:
+        w.writerow([r["date"].strftime("%Y-%m-%d") if r["date"] else "", r["description"], r["category"],
+                    r["branch"], r["account"], f"{r['amount']:.2f}", r["source"], r["status"], r["report"], r["by"]])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=imprest_transactions.csv"})
 
 
 # ── Guide ─────────────────────────────────────────────────────────────────────
