@@ -58,8 +58,8 @@
       <label class="label">Source</label>
       <select name="source" class="inp">
         <option value="all"    {% if args.get('source','all') == 'all'    %}selected{% endif %}>All Sources</option>
-        <option value="direct" {% if args.get('source') == 'direct' %}selected{% endif %}>Direct Expenses</option>
-        <option value="daily"  {% if args.get('source') == 'daily'  %}selected{% endif %}>Daily Reports</option>
+        <option value="direct" {% if args.get('source') == 'direct' %}selected{% endif %}>Zoho / Manual</option>
+        <option value="daily"  {% if args.get('source') == 'daily'  %}selected{% endif %}>Daily Branch Report</option>
       </select>
     </div>
     <div>
@@ -92,9 +92,9 @@
     <div class="kpi-sub">all sources</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Direct Expenses</div>
+    <div class="kpi-label">Zoho / Manual</div>
     <div class="kpi-value">₦{{ '{:,.0f}'.format(direct_total) }}</div>
-    <div class="kpi-sub">from imprest accounts</div>
+    <div class="kpi-sub">Zoho import or manual entry</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label">Daily Report Expenses</div>
