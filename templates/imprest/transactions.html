@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}All Transactions — Imprest & Expenses{% endblock %}
+{% block page_title %}Imprest — All Transactions{% endblock %}
+{% block content %}
+
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:20px;">
+  <div>
+    <a href="{{ url_for('imprest.dashboard') }}" style="color:var(--muted); font-size:13px; text-decoration:none;">← Imprest</a>
+    <h1 class="section-title" style="margin-top:4px;">All Transactions</h1>
+    <div style="color:var(--muted); font-size:12px; margin-top:2px;">Combines direct imprest expenses and approved daily branch report expenses</div>
+  </div>
+  <a href="{{ url_for('imprest.export_transactions') }}?{{ request.query_string.decode() }}" class="btn-outline">Export CSV</a>
+</div>
+
+{# ── Filters ── #}
+<form method="get" style="background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:20px;">
+  <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; align-items:end;">
+    <div>
+      <label class="label">Month</label>
+      <input type="month" name="month" value="{{ args.get('month','') }}" class="inp">
+    </div>
+    <div>
+      <label class="label">From</label>
+      <input type="date" name="date_from" value="{{ args.get('date_from','') }}" class="inp">
+    </div>
+    <div>
+      <label class="label">To</label>
+      <input type="date" name="date_to" value="{{ args.get('date_to','') }}" class="inp">
+    </div>
+    <div>
+      <label class="label">Branch</label>
+      <select name="branch_id" class="inp">
+        <option value="">All Branches</option>
+        {% for b in branches %}
+        <option value="{{ b.id }}" {% if args.get('branch_id') == b.id|string %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">Imprest Account</label>
+      <select name="account_id" class="inp">
+        <option value="">All Accounts</option>
+        {% for a in accounts %}
+        <option value="{{ a.id }}" {% if args.get('account_id') == a.id|string %}selected{% endif %}>{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">Category</label>
+      <select name="category_id" class="inp">
+        <option value="">All Categories</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if args.get('category_id') == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="label">Source</label>
+      <select name="source" class="inp">
+        <option value="all"    {% if args.get('source','all') == 'all'    %}selected{% endif %}>All Sources</option>
+        <option value="direct" {% if args.get('source') == 'direct' %}selected{% endif %}>Direct Expenses</option>
+        <option value="daily"  {% if args.get('source') == 'daily'  %}selected{% endif %}>Daily Reports</option>
+      </select>
+    </div>
+    <div>
+      <label class="label">Status</label>
+      <select name="status" class="inp">
+        <option value="all"      {% if args.get('status','all') == 'all'     %}selected{% endif %}>All Statuses</option>
+        <option value="approved" {% if args.get('status') == 'approved' %}selected{% endif %}>Approved</option>
+        <option value="pending"  {% if args.get('status') == 'pending'  %}selected{% endif %}>Pending</option>
+        <option value="rejected" {% if args.get('status') == 'rejected' %}selected{% endif %}>Rejected</option>
+        <option value="recorded" {% if args.get('status') == 'recorded' %}selected{% endif %}>Recorded (Direct)</option>
+      </select>
+    </div>
+  </div>
+  <div style="display:flex; gap:10px; margin-top:14px;">
+    <button type="submit" class="btn-primary">Apply Filters</button>
+    {% if args %}<a href="{{ url_for('imprest.transactions') }}" class="btn-outline">Clear</a>{% endif %}
+  </div>
+</form>
+
+{# ── KPI tiles ── #}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:20px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Rows</div>
+    <div class="kpi-value">{{ rows|length }}</div>
+    <div class="kpi-sub">matching filters</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Amount</div>
+    <div class="kpi-value" style="color:var(--amber);">₦{{ '{:,.0f}'.format(total) }}</div>
+    <div class="kpi-sub">all sources</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Direct Expenses</div>
+    <div class="kpi-value">₦{{ '{:,.0f}'.format(direct_total) }}</div>
+    <div class="kpi-sub">from imprest accounts</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Daily Report Expenses</div>
+    <div class="kpi-value">₦{{ '{:,.0f}'.format(daily_total) }}</div>
+    <div class="kpi-sub">approved / pending</div>
+  </div>
+</div>
+
+{# ── Table ── #}
+<div class="card" style="overflow:hidden; padding:0;">
+  <div style="overflow-x:auto;">
+    <table style="min-width:800px;">
+      <thead>
+        <tr>
+          <th style="width:100px;">Date</th>
+          <th>Description</th>
+          <th style="width:130px;">Category</th>
+          <th style="width:110px;">Branch</th>
+          <th style="width:160px;">Imprest Account</th>
+          <th style="text-align:right; width:110px;">Amount</th>
+          <th style="width:90px;">Source</th>
+          <th style="width:90px;">Status</th>
+          <th style="width:80px;">By</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td style="color:var(--muted); font-size:12px; white-space:nowrap;">{{ r.date.strftime('%d %b %Y') if r.date else '—' }}</td>
+          <td>
+            <div style="font-weight:500;">{{ r.description }}</div>
+            {% if r.report_id %}
+            <div style="font-size:11px; margin-top:2px;">
+              <a href="{{ url_for('clinic_report.view_report', report_id=r.report_id) }}"
+                 style="color:var(--orange2); text-decoration:none;">↗ {{ r.report_label }}</a>
+            </div>
+            {% endif %}
+          </td>
+          <td style="color:var(--muted); font-size:12px;">{{ r.category }}</td>
+          <td style="color:var(--muted); font-size:12px;">{{ r.branch }}</td>
+          <td style="font-size:12px;">
+            {% if r.account_id %}
+            <a href="{{ url_for('imprest.account_detail', account_id=r.account_id) }}"
+               style="color:var(--orange2); text-decoration:none;">{{ r.account }}</a>
+            {% else %}
+            <span style="color:var(--dim);">{{ r.account }}</span>
+            {% endif %}
+          </td>
+          <td style="text-align:right; font-weight:600; color:var(--white); white-space:nowrap;">₦{{ '{:,.0f}'.format(r.amount) }}</td>
+          <td>
+            <span style="display:inline-block; font-size:10px; font-weight:700; padding:2px 7px; border-radius:4px;
+              background:{% if r.source == 'direct' %}rgba(74,159,212,.15){% else %}rgba(245,158,11,.12){% endif %};
+              color:{% if r.source == 'direct' %}var(--blue2){% else %}var(--amber){% endif %};">
+              {{ r.source_label }}
+            </span>
+          </td>
+          <td><span class="badge badge-{{ r.status_color }}">{{ r.status | capitalize }}</span></td>
+          <td style="color:var(--muted); font-size:11px;">{{ r.by }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" style="text-align:center; color:var(--muted); padding:40px;">No transactions match the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if rows %}
+      <tfoot>
+        <tr style="background:rgba(245,158,11,.06);">
+          <td colspan="5" style="font-weight:700; padding-left:16px;">Total ({{ rows|length }} rows)</td>
+          <td style="text-align:right; font-weight:700; color:var(--amber);">₦{{ '{:,.0f}'.format(total) }}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+
+{% endblock %}
