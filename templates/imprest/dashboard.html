@@ -10,14 +10,15 @@
   </div>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
     <a href="{{ url_for('imprest.accounts') }}" class="btn-outline">Accounts</a>
-    <a href="{{ url_for('imprest.expenses') }}" class="btn-primary">Expenses</a>
+    <a href="{{ url_for('imprest.transactions') }}" class="btn-primary">Transactions</a>
+    <a href="{{ url_for('imprest.expenses') }}" class="btn-outline">Direct Expenses</a>
     <a href="{{ url_for('imprest.guide') }}" class="btn-outline">How to Use</a>
   </div>
 </div>
 
 {# Quick nav #}
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px;">
-  {% for label, url in [('Accounts', url_for('imprest.accounts')), ('All Expenses', url_for('imprest.expenses')), ('Export CSV', url_for('imprest.export_expenses'))] %}
+  {% for label, url in [('Accounts', url_for('imprest.accounts')), ('All Transactions', url_for('imprest.transactions')), ('Direct Expenses', url_for('imprest.expenses')), ('Export CSV', url_for('imprest.export_expenses'))] %}
   <a href="{{ url }}" class="card" style="padding:15px; text-decoration:none; display:flex; align-items:center; gap:10px; color:var(--white); font-size:13px; font-weight:600;">{{ label }}</a>
   {% endfor %}
 </div>
