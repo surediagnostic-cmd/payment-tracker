@@ -590,7 +590,7 @@ def transactions():
                 account_id=e.account_id,
                 amount=float(e.amount or 0),
                 source="direct",
-                source_label="Direct",
+                source_label="Zoho / Manual",
                 status="recorded",
                 status_color="blue",
                 report_id=None,
@@ -694,7 +694,7 @@ def export_transactions():
             bname = e.branch.name if e.branch else (e.account.branch.name if e.account and e.account.branch else "")
             rows.append(dict(date=e.date, description=e.description or "", category=e.category.name if e.category else "",
                 branch=bname, account=e.account.name if e.account else "", amount=float(e.amount or 0),
-                source="Direct", status="Recorded", report="", by=e.creator.name if e.creator else ""))
+                source="Zoho / Manual", status="Recorded", report="", by=e.creator.name if e.creator else ""))
 
     if source in ("all", "daily"):
         q = (db.session.query(DailyExpenseEntry, DailyReport)
