@@ -692,10 +692,10 @@ class ImprestAccount(db.Model):
 
     @property
     def total_released(self):
-        # Money actually disbursed into the float (approved AND marked uploaded/paid)
+        # Money credited to the float once the payment request is approved
         total = 0.0
         for pr in self.funding_payments:
-            if pr.status == "approved" and pr.upload_status == "uploaded":
+            if pr.status == "approved":
                 total += float(pr.approved_amount or pr.requested_amount or 0)
         return total
 
