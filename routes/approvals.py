@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 from sqlalchemy.orm import subqueryload, joinedload
 from app import db
-from models import PaymentRequest, PaymentRequestItem, User, InTransitStock
+from models import PaymentRequest, PaymentRequestItem, User, InTransitStock, ImprestActivityLog
 from utils import send_email
 
 approvals_bp = Blueprint("approvals", __name__)
@@ -81,6 +81,17 @@ def review(req_id):
 
             pr.mds_comment = comment
             pr.reviewed_at = datetime.now(timezone.utc)
+
+            # ── Credit imprest float on approval (not on upload) ─────────────────
+            if action == "approve" and pr.imprest_account_id:
+                db.session.add(ImprestActivityLog(
+                    account_id=pr.imprest_account_id,
+                    user_id=current_user.id,
+                    action="topup_disbursed",
+                    amount=pr.approved_amount or pr.requested_amount,
+                    detail=f"Payment {pr.reference} approved — float credited",
+                ))
+
             db.session.commit()
 
             # ── Create InTransitStock entries for inventory-linked items ──────────
