@@ -449,18 +449,8 @@ def mark_uploaded(req_id):
         return redirect(url_for("requests.view_request", req_id=req_id))
 
     pr.upload_status = "uploaded"
-    # If this payment funds an imprest float, its balance now reflects the disbursement.
-    if pr.imprest_account_id:
-        db.session.add(ImprestActivityLog(
-            account_id=pr.imprest_account_id, user_id=current_user.id,
-            action="topup_disbursed", amount=pr.approved_amount or pr.requested_amount,
-            detail=f"Payment {pr.reference} disbursed into float",
-        ))
     db.session.commit()
-    if pr.imprest_account_id:
-        flash(f"{pr.reference} marked as uploaded — float credited.", "success")
-    else:
-        flash(f"{pr.reference} marked as uploaded.", "success")
+    flash(f"{pr.reference} marked as uploaded.", "success")
     return redirect(url_for("requests.view_request", req_id=req_id))
 
 
@@ -475,11 +465,11 @@ def set_imprest_link(req_id):
     pr = PaymentRequest.query.get_or_404(req_id)
     imp_id = request.form.get("imprest_account_id", "").strip()
     pr.imprest_account_id = int(imp_id) if imp_id else None
-    if imp_id and pr.status == "approved" and pr.upload_status == "uploaded":
+    if imp_id and pr.status == "approved":
         db.session.add(ImprestActivityLog(
             account_id=int(imp_id), user_id=current_user.id,
             action="topup_disbursed", amount=pr.approved_amount or pr.requested_amount,
-            detail=f"Payment {pr.reference} linked to float (already disbursed)",
+            detail=f"Payment {pr.reference} linked to float (retroactive)",
         ))
     db.session.commit()
     flash("Imprest float link updated.", "success")
