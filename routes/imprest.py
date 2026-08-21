@@ -130,14 +130,31 @@ def dashboard():
     total_balance  = sum(a.balance for a in accounts)
 
     now = datetime.now(timezone.utc)
+    acct_ids = [a.id for a in accounts] or [-1]
+    allowed = _allowed_branch_ids()
+
+    # Zoho / manual expenses this month
     exp_q = Expense.query.filter(
         func.extract("year", Expense.date) == now.year,
         func.extract("month", Expense.date) == now.month,
     )
-    allowed = _allowed_branch_ids()
     if allowed is not None:
-        exp_q = exp_q.filter(Expense.account_id.in_([a.id for a in accounts] or [-1]))
+        exp_q = exp_q.filter(Expense.account_id.in_(acct_ids))
     spent_month = sum(float(e.amount or 0) for e in exp_q.all())
+
+    # Approved daily-branch-report expenses this month, dated by the report date
+    daily_q = (db.session.query(
+                  func.coalesce(func.sum(
+                      func.coalesce(DailyExpenseEntry.approved_amount,
+                                    DailyExpenseEntry.amount)), 0))
+               .join(DailyReport, DailyExpenseEntry.report_id == DailyReport.id)
+               .filter(DailyExpenseEntry.status == "approved",
+                       DailyExpenseEntry.imprest_account_id.isnot(None),
+                       func.extract("year", DailyReport.report_date) == now.year,
+                       func.extract("month", DailyReport.report_date) == now.month))
+    if allowed is not None:
+        daily_q = daily_q.filter(DailyExpenseEntry.imprest_account_id.in_(acct_ids))
+    spent_month += float(daily_q.scalar() or 0)
 
     act_q = ImprestActivityLog.query
     if allowed is not None:
