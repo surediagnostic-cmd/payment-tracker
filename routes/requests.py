@@ -466,11 +466,13 @@ def set_imprest_link(req_id):
     imp_id = request.form.get("imprest_account_id", "").strip()
     pr.imprest_account_id = int(imp_id) if imp_id else None
     if imp_id and pr.status == "approved":
-        db.session.add(ImprestActivityLog(
-            account_id=int(imp_id), user_id=current_user.id,
-            action="topup_disbursed", amount=pr.approved_amount or pr.requested_amount,
-            detail=f"Payment {pr.reference} linked to float (retroactive)",
-        ))
+        credit = pr.imprest_credit_amount
+        if credit > 0:
+            db.session.add(ImprestActivityLog(
+                account_id=int(imp_id), user_id=current_user.id,
+                action="topup_disbursed", amount=credit,
+                detail=f"Payment {pr.reference} linked to float (retroactive)",
+            ))
     db.session.commit()
     flash("Imprest float link updated.", "success")
     return redirect(url_for("requests.view_request", req_id=req_id))
