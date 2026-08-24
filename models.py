@@ -162,6 +162,26 @@ class PaymentRequest(db.Model):
         approved = float(self.approved_amount or self.requested_amount or 0)
         return round(min(total, approved), 2)
 
+    def autoselect_imprest_account(self):
+        """Default the float link when a line item is categorised Imprest / Float
+        but no float was picked on the request header.
+
+        Returns the ImprestAccount that was selected, or None if nothing changed.
+        Stays silent when the branch has no active imprest account, or more than
+        one (ambiguous — the user must choose). Does not commit.
+        """
+        if self.imprest_account_id:
+            return None
+        if not any(self._is_imprest_category(i.category) for i in self.items):
+            return None
+        accounts = ImprestAccount.query.filter_by(
+            branch_id=self.branch_id, is_active=True
+        ).order_by(ImprestAccount.id).all()
+        if len(accounts) != 1:
+            return None
+        self.imprest_account_id = accounts[0].id
+        return accounts[0]
+
     @property
     def status_color(self):
         return {"pending": "yellow", "approved": "green", "rejected": "red"}.get(self.status, "gray")
