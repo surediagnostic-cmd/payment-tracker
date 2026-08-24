@@ -38,7 +38,7 @@
       </div>
       {% if imprest_accounts %}
       <div style="margin-top:18px;">
-        <label class="label">Fund an imprest float? <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional — credits the float once this payment is approved &amp; uploaded)</span></label>
+        <label class="label">Fund an imprest float? <span style="color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400;">(optional — credits the float as soon as this payment is approved)</span></label>
         <select name="imprest_account_id" id="imprestSelect" class="inp">
           <option value="">— No, a normal payment —</option>
           {% for acc in imprest_accounts %}
