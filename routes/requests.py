@@ -395,7 +395,20 @@ def new_request():
                     ))
                     email_lines.append(f"    ↳ {cdesc} — ₦{camount:,.2f}")
 
+            # ── Auto-link the float when an Imprest / Float line item is present ──
+            auto_acct = None
+            if not pr.imprest_account_id:
+                auto_acct = pr.autoselect_imprest_account()
+
             db.session.commit()
+
+            if auto_acct:
+                flash(
+                    f"This request has an Imprest / Float line item, so it was "
+                    f"automatically linked to {auto_acct.name}. The float is "
+                    f"credited once MDS approves it.",
+                    "info",
+                )
 
             mds_email = current_app.config.get("MDS_EMAIL")
             if mds_email:
