@@ -84,13 +84,16 @@ def review(req_id):
 
             # ── Credit imprest float on approval (not on upload) ─────────────────
             if action == "approve" and pr.imprest_account_id:
-                db.session.add(ImprestActivityLog(
-                    account_id=pr.imprest_account_id,
-                    user_id=current_user.id,
-                    action="topup_disbursed",
-                    amount=pr.approved_amount or pr.requested_amount,
-                    detail=f"Payment {pr.reference} approved — float credited",
-                ))
+                credit = pr.imprest_credit_amount
+                if credit > 0:
+                    db.session.add(ImprestActivityLog(
+                        account_id=pr.imprest_account_id,
+                        user_id=current_user.id,
+                        action="topup_disbursed",
+                        amount=credit,
+                        detail=f"Payment {pr.reference} approved — float credited "
+                               f"(Imprest / Float line items)",
+                    ))
 
             db.session.commit()
 
