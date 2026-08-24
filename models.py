@@ -113,6 +113,55 @@ class PaymentRequest(db.Model):
                 pass
         return f"{prefix}-{str(max_num + 1).zfill(3)}"
 
+    @staticmethod
+    def _is_imprest_category(cat):
+        """True for the imprest-funding categories ('Imprest / Float', 'Imprest Top-Up')."""
+        if cat is None or not cat.name:
+            return False
+        return cat.name.strip().lower().startswith("imprest")
+
+    @property
+    def imprest_credit_amount(self):
+        """Amount of this payment that funds the imprest float.
+
+        Only line items categorised as Imprest / Float count. When such an item
+        has sub-items, the sub-item amounts are used and the parent's own amount
+        is ignored (the parent is a heading, not an extra charge). A sub-item
+        categorised as imprest under a non-imprest parent also counts.
+
+        Legacy fallback: if the payment is tagged to a float via the header
+        dropdown but no line item carries an imprest category, the full payment
+        amount is credited — this preserves balances created before line-level
+        crediting existed.
+        """
+        total = 0.0
+        found_imprest_line = False
+
+        for item in self.items:
+            if item.parent_id is not None:
+                continue  # handled via its parent below
+            kids = list(item.children or [])
+            if self._is_imprest_category(item.category):
+                found_imprest_line = True
+                if kids:
+                    total += sum(float(c.amount or 0) for c in kids)
+                else:
+                    total += float(item.amount or 0)
+            else:
+                for c in kids:
+                    if self._is_imprest_category(c.category):
+                        found_imprest_line = True
+                        total += float(c.amount or 0)
+
+        if not found_imprest_line:
+            if self.imprest_account_id:
+                return float(self.approved_amount or self.requested_amount or 0)
+            return 0.0
+
+        # Never credit more than was actually approved.
+        approved = float(self.approved_amount or self.requested_amount or 0)
+        return round(min(total, approved), 2)
+
     @property
     def status_color(self):
         return {"pending": "yellow", "approved": "green", "rejected": "red"}.get(self.status, "gray")
@@ -692,12 +741,15 @@ class ImprestAccount(db.Model):
 
     @property
     def total_released(self):
-        # Money credited to the float once the payment request is approved
+        # Money credited to the float once the payment request is approved.
+        # Only the Imprest / Float line items of each payment count (see
+        # PaymentRequest.imprest_credit_amount), so a mixed payment no longer
+        # credits its full total.
         total = 0.0
         for pr in self.funding_payments:
             if pr.status == "approved":
-                total += float(pr.approved_amount or pr.requested_amount or 0)
-        return total
+                total += pr.imprest_credit_amount
+        return round(total, 2)
 
     @property
     def total_spent(self):
