@@ -83,6 +83,12 @@ def review(req_id):
             pr.reviewed_at = datetime.now(timezone.utc)
 
             # ── Credit imprest float on approval (not on upload) ─────────────────
+            # Safety net: link the float if an Imprest / Float line item exists
+            # but the header dropdown was left blank (covers requests created
+            # before auto-select, or where the float was set up later).
+            if action == "approve" and not pr.imprest_account_id:
+                pr.autoselect_imprest_account()
+
             if action == "approve" and pr.imprest_account_id:
                 credit = pr.imprest_credit_amount
                 if credit > 0:
