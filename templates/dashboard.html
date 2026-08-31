@@ -623,7 +623,6 @@ new Chart(document.getElementById('categoryChart'), {
 {% endif %}
 
 {% if category_items %}
-<script>
 const CAT_ITEMS = {{ category_items | tojson }};
 function _fmt(n){ return Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function openCategoryModal(name){
@@ -656,7 +655,6 @@ function closeCategoryModal(){
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCategoryModal(); });
-</script>
 {% endif %}
 
 // Branch accordion
