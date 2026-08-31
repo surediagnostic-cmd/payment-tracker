@@ -33,9 +33,7 @@
 </form>
 
 {% if rows %}
-{# Summary KPIs #}
-{% set total_consumed = rows | sum(attribute='consumed') | default(0, true) %}
-{% set total_received = rows | sum(attribute='received') | default(0, true) %}
+{# Summary KPIs — totals computed None-safely in the route #}
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:24px;">
   <div class="kpi-card">
     <div class="kpi-label">Items Tracked</div>
