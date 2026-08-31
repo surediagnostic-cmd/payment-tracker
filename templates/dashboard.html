@@ -173,12 +173,39 @@ function applyFilter() {
     {% endif %}
   </div>
   <div class="card" style="padding:22px;">
-    <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:14px;">{{ month_label }} — Spend by Category</div>
+    <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:14px;">{{ month_label }} — Spend by Category <span style="color:var(--dim); font-size:10px; text-transform:none; letter-spacing:0;">(click a slice for details)</span></div>
     {% if category_data %}
     <canvas id="categoryChart" height="200"></canvas>
     {% else %}
     <div style="text-align:center; padding:32px; color:var(--dim); font-size:13px;">No approved data this month.</div>
     {% endif %}
+  </div>
+</div>
+
+<!-- Category drill-down modal -->
+<div id="catModal" onclick="if(event.target===this)closeCategoryModal()"
+     style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(4,12,28,.72);
+            padding:40px 16px; overflow-y:auto;">
+  <div style="max-width:760px; margin:0 auto; background:var(--card); border:1px solid var(--border);
+              border-radius:14px; padding:24px; box-shadow:0 24px 60px rgba(0,0,0,.5);">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px;">
+      <div>
+        <div id="catModalTitle" style="font-size:16px; font-weight:800; color:var(--white);"></div>
+        <div id="catModalSummary" style="font-size:12px; color:var(--muted); margin-top:3px;"></div>
+      </div>
+      <button type="button" onclick="closeCategoryModal()" class="btn-outline"
+              style="padding:4px 12px; font-size:16px; line-height:1;">&times;</button>
+    </div>
+    <div style="overflow:hidden; border-radius:10px; border:1px solid var(--border);">
+      <table style="width:100%;">
+        <thead><tr><th>Reference</th><th>Date</th><th>Branch</th><th>Description</th><th style="text-align:right;">Amount (₦)</th></tr></thead>
+        <tbody id="catModalBody"></tbody>
+        <tfoot><tr style="border-top:2px solid var(--border);">
+          <td colspan="4" style="font-weight:700; color:var(--muted); text-align:right;">Total</td>
+          <td id="catModalTotal" style="font-weight:800; color:var(--orange2); text-align:right;"></td>
+        </tr></tfoot>
+      </table>
+    </div>
   </div>
 </div>
 {% endif %}
@@ -579,11 +606,57 @@ new Chart(document.getElementById('categoryChart'), {
   },
   options: {
     responsive: true,
+    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+    onClick: (e, els, chart) => {
+      if (!els.length) return;
+      openCategoryModal(chart.data.labels[els[0].index]);
+    },
     plugins: {
-      legend: { position:'right', labels:{ color:'#7a9cc4', font:{size:11}, boxWidth:12, padding:10 } }
+      legend: {
+        position:'right',
+        labels:{ color:'#7a9cc4', font:{size:11}, boxWidth:12, padding:10 },
+        onClick: (e, item) => openCategoryModal(item.text)
+      }
     }
   }
 });
+{% endif %}
+
+{% if category_items %}
+<script>
+const CAT_ITEMS = {{ category_items | tojson }};
+function _fmt(n){ return Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function openCategoryModal(name){
+  const items = CAT_ITEMS[name] || [];
+  document.getElementById('catModalTitle').textContent = name;
+  const total = items.reduce((s,i)=>s + (i.amount||0), 0);
+  document.getElementById('catModalSummary').textContent =
+    items.length + ' line item' + (items.length===1?'':'s') + ' · {{ month_label }}';
+  document.getElementById('catModalTotal').textContent = '₦' + _fmt(total);
+  const body = document.getElementById('catModalBody');
+  if (!items.length){
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--dim); padding:20px;">No line items.</td></tr>';
+  } else {
+    body.innerHTML = items.map(i =>
+      '<tr>' +
+      '<td style="font-family:monospace; color:var(--orange2); font-size:12px;">' +
+        '<a href="/requests/' + i.req_id + '" style="color:var(--orange2); text-decoration:none;">' + i.reference + '</a></td>' +
+      '<td style="color:var(--muted); white-space:nowrap;">' + i.date + '</td>' +
+      '<td style="font-size:12px;">' + i.branch + '</td>' +
+      '<td>' + i.description + '</td>' +
+      '<td style="text-align:right; font-weight:700; color:var(--white); white-space:nowrap;">' + _fmt(i.amount) + '</td>' +
+      '</tr>'
+    ).join('');
+  }
+  document.getElementById('catModal').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+function closeCategoryModal(){
+  document.getElementById('catModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCategoryModal(); });
+</script>
 {% endif %}
 
 // Branch accordion
