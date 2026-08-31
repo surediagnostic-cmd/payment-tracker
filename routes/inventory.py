@@ -1615,10 +1615,16 @@ def reports():
             .order_by(func.sum(func.abs(StockTransaction.qty)).filter(StockTransaction.qty < 0).desc().nullslast())\
             .all()
 
+    # None-safe KPI totals (FILTER aggregates return NULL for items with no
+    # consumption/receipt, which would break a Jinja `| sum` in the template).
+    total_consumed = sum(float(r.consumed or 0) for r in rows)
+    total_received = sum(float(r.received or 0) for r in rows)
+
     return render_template("inventory/reports.html",
         rows=rows, branches=branches,
         branch_id=branch_id,
         date_from=date_from_s, date_to=date_to_s,
+        total_consumed=total_consumed, total_received=total_received,
     )
 
 
