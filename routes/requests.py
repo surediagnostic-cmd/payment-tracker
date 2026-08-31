@@ -163,6 +163,34 @@ def _dashboard_inner():
         category_data = cat_q.group_by(Category.name, Category.cost_type)\
                              .order_by(func.sum(PaymentRequestItem.amount).desc()).all()
 
+        # ── Per-category line-item detail (drill-down for the pie) ────────────
+        citem_q = db.session.query(
+            Category.name.label("cat"),
+            PaymentRequest.reference.label("reference"),
+            PaymentRequest.date.label("dt"),
+            Branch.name.label("branch"),
+            PaymentRequestItem.description.label("description"),
+            PaymentRequestItem.amount.label("amount"),
+            PaymentRequest.id.label("req_id"),
+        ).select_from(PaymentRequestItem)\
+         .join(Category, Category.id == PaymentRequestItem.category_id)\
+         .join(PaymentRequest, PaymentRequest.id == PaymentRequestItem.request_id)\
+         .join(Branch, Branch.id == PaymentRequest.branch_id)\
+         .filter(PaymentRequest.status == "approved")
+        citem_q = month_filter(citem_q)
+        if selected_branch:
+            citem_q = citem_q.filter(PaymentRequest.branch_id == selected_branch)
+        category_items = defaultdict(list)
+        for r in citem_q.order_by(PaymentRequest.date.desc()).all():
+            category_items[r.cat].append({
+                "reference": r.reference,
+                "date": r.dt.strftime("%d %b %Y") if r.dt else "",
+                "branch": r.branch,
+                "description": r.description or "—",
+                "amount": float(r.amount or 0),
+                "req_id": r.req_id,
+            })
+
         # ── Direct cost / overhead totals ─────────────────────────────────────
         def _cost_total(cost_type):
             q = db.session.query(func.sum(PaymentRequestItem.amount))\
@@ -206,6 +234,7 @@ def _dashboard_inner():
             branch_requests=branch_requests,
             total_direct_cost=total_direct_cost, total_overhead=total_overhead,
             category_data=category_data, variance_data=variance_data, recent=recent,
+            category_items=dict(category_items),
         )
 
     else:
@@ -245,6 +274,35 @@ def _dashboard_inner():
         category_data = cat_q.group_by(Category.name, Category.cost_type)\
                              .order_by(func.sum(PaymentRequestItem.amount).desc()).all()
 
+        # ── Per-category line-item detail (drill-down for the pie) ────────────
+        citem_q = db.session.query(
+            Category.name.label("cat"),
+            PaymentRequest.reference.label("reference"),
+            PaymentRequest.date.label("dt"),
+            Branch.name.label("branch"),
+            PaymentRequestItem.description.label("description"),
+            PaymentRequestItem.amount.label("amount"),
+            PaymentRequest.id.label("req_id"),
+        ).select_from(PaymentRequestItem)\
+         .join(Category, Category.id == PaymentRequestItem.category_id)\
+         .join(PaymentRequest, PaymentRequest.id == PaymentRequestItem.request_id)\
+         .join(Branch, Branch.id == PaymentRequest.branch_id)\
+         .filter(PaymentRequest.status == "approved",
+                 PaymentRequest.submitted_by == current_user.id)
+        citem_q = month_filter(citem_q)
+        if acct_branch_filter:
+            citem_q = citem_q.filter(PaymentRequest.branch_id == acct_branch_filter)
+        category_items = defaultdict(list)
+        for r in citem_q.order_by(PaymentRequest.date.desc()).all():
+            category_items[r.cat].append({
+                "reference": r.reference,
+                "date": r.dt.strftime("%d %b %Y") if r.dt else "",
+                "branch": r.branch,
+                "description": r.description or "—",
+                "amount": float(r.amount or 0),
+                "req_id": r.req_id,
+            })
+
         status_counts = {
             "pending":  sum(1 for r in my_requests if r.status == "pending"),
             "approved": sum(1 for r in my_requests if r.status == "approved"),
@@ -261,6 +319,7 @@ def _dashboard_inner():
             my_requests=my_requests, my_pending=my_pending,
             my_total=my_total, approved_count=len(my_approved),
             category_data=category_data, status_counts=status_counts,
+            category_items=dict(category_items),
         )
 
 
