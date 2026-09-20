@@ -170,7 +170,9 @@ def _dashboard_inner():
             PaymentRequest.date.label("dt"),
             Branch.name.label("branch"),
             PaymentRequestItem.description.label("description"),
+            PaymentRequestItem.notes.label("notes"),
             PaymentRequestItem.amount.label("amount"),
+            PaymentRequest.beneficiary_name.label("beneficiary"),
             PaymentRequest.id.label("req_id"),
         ).select_from(PaymentRequestItem)\
          .join(Category, Category.id == PaymentRequestItem.category_id)\
@@ -187,6 +189,8 @@ def _dashboard_inner():
                 "date": r.dt.strftime("%d %b %Y") if r.dt else "",
                 "branch": r.branch,
                 "description": r.description or "—",
+                "notes": r.notes or "",
+                "beneficiary": r.beneficiary or "—",
                 "amount": float(r.amount or 0),
                 "req_id": r.req_id,
             })
@@ -281,7 +285,9 @@ def _dashboard_inner():
             PaymentRequest.date.label("dt"),
             Branch.name.label("branch"),
             PaymentRequestItem.description.label("description"),
+            PaymentRequestItem.notes.label("notes"),
             PaymentRequestItem.amount.label("amount"),
+            PaymentRequest.beneficiary_name.label("beneficiary"),
             PaymentRequest.id.label("req_id"),
         ).select_from(PaymentRequestItem)\
          .join(Category, Category.id == PaymentRequestItem.category_id)\
@@ -299,6 +305,8 @@ def _dashboard_inner():
                 "date": r.dt.strftime("%d %b %Y") if r.dt else "",
                 "branch": r.branch,
                 "description": r.description or "—",
+                "notes": r.notes or "",
+                "beneficiary": r.beneficiary or "—",
                 "amount": float(r.amount or 0),
                 "req_id": r.req_id,
             })
