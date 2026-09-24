@@ -495,7 +495,9 @@ def new_request():
                 )
 
             flash(f"Payment request {ref} submitted successfully.", "success")
-            return redirect(url_for("requests.dashboard"))
+            # ?submitted= tells the browser the entry is safely in the DB, which
+            # is the only point at which the locally saved draft is discarded.
+            return redirect(url_for("requests.dashboard", submitted=ref))
         except Exception as e:
             try:
                 db.session.rollback()
@@ -919,7 +921,7 @@ def edit_request(req_id):
 
             db.session.commit()
             flash(f"Request {pr.reference} updated successfully.", "success")
-            return redirect(url_for("requests.view_request", req_id=req_id))
+            return redirect(url_for("requests.view_request", req_id=req_id, submitted=pr.reference))
 
         except Exception as e:
             try: db.session.rollback()
