@@ -9,6 +9,27 @@
     <div style="font-size:13px; color:var(--muted); margin-top:4px;">{% if edit_mode %}Pending · {{ pr.branch.name }}{% else %}{{ current_user.name }}{% endif %}</div>
   </div>
 
+  <!-- Recovered-draft banner -->
+  <div id="draftBanner" style="display:none; align-items:center; gap:12px; flex-wrap:wrap;
+       margin-bottom:16px; padding:12px 16px; border-radius:8px;
+       background:rgba(34,197,94,.10); border:1px solid rgba(34,197,94,.35); font-size:13px; color:var(--white);">
+    <span id="draftBannerText" style="flex:1; min-width:220px;"></span>
+    <button type="button" id="draftRestoreBtn" onclick="restoreDraft()" class="btn-outline"
+            style="padding:5px 14px; font-size:12px; display:none;">Restore my entries</button>
+    <button type="button" onclick="discardDraft()" class="btn-outline"
+            style="padding:5px 14px; font-size:12px;">Start fresh</button>
+  </div>
+
+  <!-- Session-expired warning -->
+  <div id="sessionWarn" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:8px;
+       background:rgba(248,113,113,.10); border:1px solid rgba(248,113,113,.4); font-size:13px; color:var(--white);">
+    <strong style="color:#f87171;">Your login has expired.</strong>
+    Everything you have typed is saved in this browser.
+    <a href="{{ url_for('auth.login') }}" target="_blank" rel="noopener"
+       style="color:var(--orange2); font-weight:700;">Sign in again in a new tab</a>,
+    then come back to this page and press Save — nothing will be lost.
+  </div>
+
   <form method="POST" action="{% if edit_mode %}{{ url_for('requests.edit_request', req_id=pr.id) }}{% else %}{{ url_for('requests.new_request') }}{% endif %}" id="prForm">
     <!-- Items serialized as JSON on submit -->
     <input type="hidden" id="items_json" name="items_json" value="">
@@ -171,7 +192,11 @@
       </div>
     </div>
 
-    <div style="display:flex; gap:12px; justify-content:flex-end;">
+    <div style="display:flex; gap:12px; justify-content:flex-end; align-items:center;">
+      <div id="draftStatus" style="flex:1; font-size:11.5px; color:var(--dim);">
+        Your entries are saved in this browser as you type, so a reload or an expired
+        login will not lose them.
+      </div>
       <a href="{% if edit_mode %}{{ url_for('requests.view_request', req_id=pr.id) }}{% else %}{{ url_for('requests.dashboard') }}{% endif %}" class="btn-outline">Cancel</a>
       <button type="submit" class="btn-primary" style="padding:12px 28px; font-size:15px;">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -719,6 +744,178 @@ function autoPickFloat() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 updateRemoveButtons();
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DRAFT AUTO-SAVE & RECOVERY
+//  Everything typed here is mirrored into localStorage, and only cleared once
+//  the server confirms the save (dashboard/detail page reached with ?submitted=).
+//  A reload, a dropped session or a failed POST therefore never loses entries.
+// ══════════════════════════════════════════════════════════════════════════════
+const DRAFT_KEY = 'prDraft:{% if edit_mode %}edit:{{ pr.id }}{% else %}new{% endif %}:{{ current_user.id }}';
+const HEADER_FIELDS = ['date','branch_id','imprest_account_id','beneficiary_name',
+                       'beneficiary_account','beneficiary_bank','bank_code'];
+const EDIT_MODE = {% if edit_mode %}true{% else %}false{% endif %};
+
+function _lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function _lsSet(k,v){ try { localStorage.setItem(k,v); return true; } catch(e){ return false; } }
+function _lsDel(k){ try { localStorage.removeItem(k); } catch(e){} }
+
+function _fieldVal(row, f){
+  const el = row.querySelector('[data-field="' + f + '"]');
+  return el ? (el.value || '') : '';
+}
+
+// Same shape as the submit serializer, but never validates and never blocks.
+function snapshotItems(){
+  const items = [];
+  document.querySelectorAll('#itemsContainer > .item-row').forEach(function(parentRow){
+    const uid = parentRow.dataset.uid;
+    const children = [];
+    parentRow.querySelectorAll('.item-row[data-parent="' + uid + '"]').forEach(function(cr){
+      children.push({
+        description:       _fieldVal(cr,'description'),
+        category_id:       _fieldVal(cr,'category_id'),
+        quantity:          _fieldVal(cr,'quantity') || '1',
+        rate:              (_fieldVal(cr,'rate') || '').replace(/,/g,''),
+        notes:             _fieldVal(cr,'notes'),
+        inventory_item_id: _fieldVal(cr,'inventory_item_id') || null,
+        qty_ordered:       _fieldVal(cr,'qty_ordered') || null,
+      });
+    });
+    items.push({
+      description:       _fieldVal(parentRow,'description'),
+      category_id:       _fieldVal(parentRow,'category_id'),
+      quantity:          _fieldVal(parentRow,'quantity') || '1',
+      rate:              (_fieldVal(parentRow,'rate') || '').replace(/,/g,''),
+      notes:             _fieldVal(parentRow,'notes'),
+      inventory_item_id: _fieldVal(parentRow,'inventory_item_id') || null,
+      qty_ordered:       _fieldVal(parentRow,'qty_ordered') || null,
+      children:          children,
+    });
+  });
+  return items;
+}
+
+function _rowFilled(i){
+  return !!((i.description || '').trim()) || parseFloat(i.rate || 0) > 0;
+}
+function draftHasContent(d){
+  if (!d) return false;
+  const items = d.items || [];
+  if (items.some(function(i){
+    return _rowFilled(i) || (i.children || []).some(_rowFilled);
+  })) return true;
+  return !!(d.header && (d.header.beneficiary_name || '').trim());
+}
+
+function _clock(ts){
+  try { return new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+  catch(e){ return ''; }
+}
+
+function markSaved(ts){
+  const el = document.getElementById('draftStatus');
+  if (el) el.innerHTML = 'Draft saved at ' + _clock(ts) +
+    ' &middot; your entries are held in this browser until the request is submitted.';
+}
+
+let _saveTimer = null;
+let _discarded = false;   // set by discardDraft(), so nothing re-saves on unload
+function saveDraftNow(){
+  if (_discarded) return;
+  const header = {};
+  HEADER_FIELDS.forEach(function(n){
+    const el = document.querySelector('#prForm [name="' + n + '"]');
+    if (el) header[n] = el.value;
+  });
+  const payload = {v:1, savedAt: Date.now(), header: header, items: snapshotItems()};
+  if (!draftHasContent(payload)) return;   // never persist an untouched form
+  if (_lsSet(DRAFT_KEY, JSON.stringify(payload))) markSaved(payload.savedAt);
+}
+function queueSave(){ clearTimeout(_saveTimer); _saveTimer = setTimeout(saveDraftNow, 700); }
+
+(function(){
+  const form = document.getElementById('prForm');
+  form.addEventListener('input',  queueSave);
+  form.addEventListener('change', queueSave);
+  setInterval(saveDraftNow, 20000);              // safety net for slow typists
+  window.addEventListener('beforeunload', saveDraftNow);
+})();
+
+let _pendingDraft = null;
+
+function applyDraft(d){
+  HEADER_FIELDS.forEach(function(n){
+    const el = document.querySelector('#prForm [name="' + n + '"]');
+    if (el && d.header && d.header[n]) el.value = d.header[n];
+  });
+  if ((d.items || []).length) loadExistingItems(d.items);
+  calcGrandTotal();
+}
+function restoreDraft(){
+  if (!_pendingDraft) return;
+  applyDraft(_pendingDraft);
+  const btn = document.getElementById('draftRestoreBtn');
+  if (btn) btn.style.display = 'none';
+  document.getElementById('draftBannerText').textContent =
+    'Restored your unsaved entries from ' + _clock(_pendingDraft.savedAt) + '.';
+}
+function discardDraft(){
+  // Order matters: stop every save path *before* deleting, otherwise the
+  // pending debounce or the unload handler writes the draft straight back.
+  _discarded = true;
+  clearTimeout(_saveTimer);
+  _lsDel(DRAFT_KEY);
+  _pendingDraft = null;
+  document.getElementById('draftBanner').style.display = 'none';
+  window.location.reload();
+}
+
+(function recoverDraft(){
+  let d = null;
+  try { d = JSON.parse(_lsGet(DRAFT_KEY) || 'null'); } catch(e){ d = null; }
+  if (!draftHasContent(d)) return;
+  _pendingDraft = d;
+  const banner = document.getElementById('draftBanner');
+  const text   = document.getElementById('draftBannerText');
+  banner.style.display = 'flex';
+  if (EDIT_MODE) {
+    // The saved request is already on screen — let the user choose.
+    text.textContent = 'You have unsaved edits from ' + _clock(d.savedAt) + '.';
+    document.getElementById('draftRestoreBtn').style.display = '';
+  } else {
+    // A leftover draft on a blank form means an interrupted entry: bring it back.
+    applyDraft(d);
+    text.textContent = 'Recovered your unsaved entries from ' + _clock(d.savedAt) +
+                       '. Check them over, then submit.';
+  }
+})();
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  KEEP-ALIVE
+//  No request is made while you type, so the login cookie and the server
+//  instance both used to go cold during a long entry — and the Save that
+//  followed could be dropped. A small ping every 4 minutes prevents that and
+//  warns immediately if the login is gone.
+// ══════════════════════════════════════════════════════════════════════════════
+(function(){
+  let warned = false;
+  function warnSessionLost(){
+    if (warned) return;
+    warned = true;
+    saveDraftNow();
+    const b = document.getElementById('sessionWarn');
+    if (b) b.style.display = 'block';
+  }
+  setInterval(function(){
+    fetch('{{ url_for("ping") }}', {credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ if (d && d.authenticated === false) warnSessionLost(); })
+      .catch(function(){ /* offline or waking up — ignore */ });
+  }, 4 * 60 * 1000);
+})();
 </script>
 {% endblock %}
 
