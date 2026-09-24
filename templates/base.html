@@ -297,6 +297,17 @@ function closeSidebar() {
   document.getElementById('hamburger').classList.remove('open');
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
+
+// A page reached with ?submitted=<ref> means the server has the request safely
+// stored, so the locally held payment-entry draft can finally be dropped.
+(function(){
+  try {
+    if (!new URLSearchParams(window.location.search).has('submitted')) return;
+    Object.keys(localStorage)
+      .filter(function(k){ return k.indexOf('prDraft:') === 0; })
+      .forEach(function(k){ localStorage.removeItem(k); });
+  } catch(e) { /* private mode / storage disabled */ }
+})();
 </script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
