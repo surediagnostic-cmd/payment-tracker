@@ -1,5 +1,6 @@
 import os
-from flask import Flask, redirect, url_for
+from datetime import timedelta
+from flask import Flask, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_mail import Mail
@@ -14,6 +15,18 @@ def create_app():
     app = Flask(__name__)
 
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
+
+    # ── Session longevity ────────────────────────────────────────────────────
+    # Long payment-entry sessions must never expire mid-form. The session
+    # cookie is made permanent (see _keep_session_alive below) so it survives
+    # browser restarts, and its clock is pushed forward on every request.
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+    app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
+    app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+    app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
         "DATABASE_URL", "sqlite:///payments.db"
     )
@@ -88,6 +101,25 @@ def create_app():
     def health():
         return "ok", 200
 
+    @app.route("/ping")
+    def ping():
+        """Keep-alive for long data-entry screens.
+
+        The payment-entry form pings this every few minutes. Two jobs:
+        1. Keeps the Render instance warm, so a Save after 20 minutes of
+           typing is not held up by a cold start (which used to drop the POST).
+        2. Refreshes the session cookie and tells the page whether the login
+           is still valid, so the form can warn *before* the user hits Save.
+        """
+        from flask_login import current_user
+        return {"ok": True, "authenticated": bool(current_user.is_authenticated)}, 200
+
+    @app.before_request
+    def _keep_session_alive():
+        # Permanent session => honours PERMANENT_SESSION_LIFETIME (7 days)
+        # instead of dying with the browser session.
+        session.permanent = True
+
     @app.before_request
     def _imprest_only_guard():
         # Cashiers are limited to the Imprest & Expenses module for now.
@@ -96,7 +128,7 @@ def create_app():
         if not current_user.is_authenticated or not getattr(current_user, "is_cashier", False):
             return
         ep = request.endpoint or ""
-        if ep.startswith("imprest") or ep.startswith("clinic_report") or ep.startswith("auth") or ep in ("root", "health", "static"):
+        if ep.startswith("imprest") or ep.startswith("clinic_report") or ep.startswith("auth") or ep in ("root", "health", "ping", "static"):
             return
         return redirect(url_for("imprest.dashboard"))
 
