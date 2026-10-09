@@ -112,7 +112,13 @@ def create_app():
            is still valid, so the form can warn *before* the user hits Save.
         """
         from flask_login import current_user
-        return {"ok": True, "authenticated": bool(current_user.is_authenticated)}, 200
+        # Render injects RENDER_GIT_COMMIT, so this also answers "which
+        # version is actually live?" without needing a login.
+        return {
+            "ok": True,
+            "authenticated": bool(current_user.is_authenticated),
+            "commit": (os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:8],
+        }, 200
 
     @app.before_request
     def _keep_session_alive():
