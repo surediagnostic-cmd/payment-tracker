@@ -964,13 +964,47 @@ def edit_request(req_id):
 @requests_bp.route("/requests/<int:req_id>/delete", methods=["POST"])
 @login_required
 def delete_request(req_id):
-    if not current_user.is_mds:
-        flash("Only MDS can delete payment requests.", "error")
-        return redirect(url_for("requests.dashboard"))
     pr = PaymentRequest.query.get_or_404(req_id)
-    ref = pr.reference
+
+    # MDS can delete anything. The submitter can withdraw their own request,
+    # but only while it is still pending — once MDS has acted on it, it is
+    # part of the record and stays.
+    is_owner_pending = (pr.submitted_by == current_user.id and pr.status == "pending")
+    if not (current_user.is_mds or is_owner_pending):
+        if pr.submitted_by == current_user.id:
+            flash(f"{pr.reference} has already been {pr.status} by MDS and can no longer be deleted.", "error")
+            return redirect(url_for("requests.view_request", req_id=req_id))
+        flash("You can only delete your own requests.", "error")
+        return redirect(url_for("requests.dashboard"))
+
+    ref       = pr.reference
+    amount    = pr.requested_amount
+    branch    = pr.branch.name if pr.branch else "—"
+    by_owner  = not current_user.is_mds
     db.session.delete(pr)
     db.session.commit()
+    print(f"[delete] {ref} deleted by {current_user.email} (owner={by_owner})", flush=True)
+
+    if by_owner:
+        # MDS was emailed when this was submitted — tell them it is gone so
+        # they are not left looking for it in the approval queue.
+        mds_email = current_app.config.get("MDS_EMAIL")
+        if mds_email:
+            send_email(
+                to=mds_email,
+                subject=f"[Sure Finance] Payment Request Withdrawn — {ref}",
+                body=(
+                    f"{current_user.name} has withdrawn (deleted) a pending payment request "
+                    f"before review.\n\n"
+                    f"Reference: {ref}\n"
+                    f"Branch: {branch}\n"
+                    f"Amount Requested: \u20a6{amount:,.2f}\n\n"
+                    f"No action is needed."
+                ),
+            )
+        flash(f"Payment request {ref} has been deleted.", "warning")
+        return redirect(url_for("requests.dashboard"))
+
     flash(f"Payment request {ref} has been permanently deleted.", "warning")
     return redirect(url_for("requests.list_requests"))
 
