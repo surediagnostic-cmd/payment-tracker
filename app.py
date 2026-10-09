@@ -30,11 +30,17 @@ def create_app():
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
         "DATABASE_URL", "sqlite:///payments.db"
     )
-    # Render/Supabase sometimes returns postgres:// — SQLAlchemy needs postgresql://
-    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("postgres://"):
-        app.config["SQLALCHEMY_DATABASE_URI"] = app.config[
-            "SQLALCHEMY_DATABASE_URI"
-        ].replace("postgres://", "postgresql://", 1)
+    # Pin the Postgres driver explicitly. Render/Supabase may hand us
+    # postgres:// or postgresql:// with no driver, and SQLAlchemy 2.1 changed
+    # the default driver for those from psycopg2 to psycopg (v3) — which is
+    # not installed, so the app crashed at boot. psycopg2 is what we ship.
+    for _prefix in ("postgres://", "postgresql://"):
+        if app.config["SQLALCHEMY_DATABASE_URI"].startswith(_prefix):
+            app.config["SQLALCHEMY_DATABASE_URI"] = (
+                "postgresql+psycopg2://"
+                + app.config["SQLALCHEMY_DATABASE_URI"][len(_prefix):]
+            )
+            break
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     # NullPool + PgBouncer-safe options for Supabase Session Pooler on Railway.
     # Railway is IPv4-only; direct Supabase port 5432 resolves to IPv6 and fails.
