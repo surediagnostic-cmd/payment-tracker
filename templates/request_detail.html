@@ -211,7 +211,7 @@
     </a>
     {% endif %}
     <a href="{{ url_for('requests.list_requests') }}" class="btn-outline">All Payments</a>
-    {% if current_user.is_mds %}
+    {% if current_user.is_mds or (pr.submitted_by == current_user.id and pr.status == 'pending') %}
     <form method="POST" action="{{ url_for('requests.delete_request', req_id=pr.id) }}"
           onsubmit="return confirm('Permanently delete {{ pr.reference }}? This cannot be undone.')">
       <button type="submit" class="btn-danger" style="padding:9px 18px;">🗑 Delete Request</button>
