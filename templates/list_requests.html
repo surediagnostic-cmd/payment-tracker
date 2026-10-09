@@ -121,9 +121,9 @@
           {% else %}
           <a href="{{ url_for('requests.view_request', req_id=pr.id) }}" style="color:var(--orange); font-size:12px; text-decoration:none; font-weight:600;">View</a>
           {% endif %}
-          {% if current_user.is_mds %}
+          {% if current_user.is_mds or (pr.submitted_by == current_user.id and pr.status == 'pending') %}
           <form method="POST" action="{{ url_for('requests.delete_request', req_id=pr.id) }}" style="display:inline;"
-                onsubmit="return confirm('Delete {{ pr.reference }}?')">
+                onsubmit="return confirm('Permanently delete {{ pr.reference }}? This cannot be undone.')">
             <button type="submit" class="btn-danger" style="padding:4px 10px; font-size:11px; margin-left:4px;">Del</button>
           </form>
           {% endif %}
